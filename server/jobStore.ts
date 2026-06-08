@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getJobRecord, listJobRecords, saveJobRecord } from "./infrastructure.js";
 
 export interface ScanJob {
   id: string;
@@ -24,18 +25,23 @@ function ensureStore() {
   fs.mkdirSync(jobDir, { recursive: true });
 }
 
-export function saveJob(job: ScanJob) {
+export async function saveJob(job: ScanJob) {
   ensureStore();
   fs.writeFileSync(path.join(jobDir, `${safeId(job.id)}.json`), JSON.stringify(job, null, 2));
+  await saveJobRecord(job);
 }
 
-export function getJob(id: string): ScanJob | null {
+export async function getJob(id: string): Promise<ScanJob | null> {
+  const stored = await getJobRecord(id);
+  if (stored) return stored;
   ensureStore();
   const file = path.join(jobDir, `${safeId(id)}.json`);
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
 }
 
-export function listJobs(): ScanJob[] {
+export async function listJobs(): Promise<ScanJob[]> {
+  const stored = await listJobRecords();
+  if (stored) return stored.filter(Boolean);
   ensureStore();
   return fs.readdirSync(jobDir)
     .filter((file) => file.endsWith(".json"))

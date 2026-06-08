@@ -36,6 +36,7 @@ const restrictions = [
   "--memory", "1g",
   "--memory-swap", "1g",
   "--pids-limit", "128",
+  "--env", "HOME=/tmp",
   "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m"
 ];
 

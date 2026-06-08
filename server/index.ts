@@ -1,3 +1,4 @@
+import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
@@ -30,7 +31,7 @@ app.get("/api/report", (_request, response) => {
 app.post("/api/scan", async (_request, response) => {
   activeScan ??= runGuardianScan().finally(() => { activeScan = null; });
   latest = await activeScan;
-  saveReport(latest);
+  await saveReport(latest);
   response.json(latest);
 });
 
@@ -39,21 +40,21 @@ const sourceRequest = z.object({
   source: z.string().min(20).max(500_000)
 });
 
-app.post("/api/analyze", (request, response) => {
+app.post("/api/analyze", async (request, response) => {
   const parsed = sourceRequest.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: "Invalid Solidity source request", details: parsed.error.flatten() });
     return;
   }
   const report = analyzeSource(parsed.data.name, parsed.data.source);
-  saveReport(report);
+  await saveReport(report);
   response.json(report);
 });
 
-app.get("/api/reports", (_request, response) => response.json(listReports()));
+app.get("/api/reports", async (_request, response) => response.json(await listReports()));
 
-app.get("/api/reports/:scanId", (request, response) => {
-  const report = getReport(request.params.scanId);
+app.get("/api/reports/:scanId", async (request, response) => {
+  const report = await getReport(request.params.scanId);
   if (!report) {
     response.status(404).json({ error: "Report not found" });
     return;
@@ -63,7 +64,7 @@ app.get("/api/reports/:scanId", (request, response) => {
 
 const repositoryRequest = z.object({ repository: z.string().url().max(300) });
 
-app.post("/api/jobs/repository", (request, response) => {
+app.post("/api/jobs/repository", async (request, response) => {
   const parsed = repositoryRequest.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: "Invalid repository request", details: parsed.error.flatten() });
@@ -71,7 +72,7 @@ app.post("/api/jobs/repository", (request, response) => {
   }
   try {
     const job = createRepositoryJob(parsed.data.repository);
-    saveJob(job);
+    await saveJob(job);
     void runRepositoryScan(job);
     response.status(202).json(job);
   } catch (reason) {
@@ -79,10 +80,10 @@ app.post("/api/jobs/repository", (request, response) => {
   }
 });
 
-app.get("/api/jobs", (_request, response) => response.json(listJobs()));
+app.get("/api/jobs", async (_request, response) => response.json(await listJobs()));
 
-app.get("/api/jobs/:jobId", (request, response) => {
-  const job = getJob(request.params.jobId);
+app.get("/api/jobs/:jobId", async (request, response) => {
+  const job = await getJob(request.params.jobId);
   if (!job) {
     response.status(404).json({ error: "Job not found" });
     return;

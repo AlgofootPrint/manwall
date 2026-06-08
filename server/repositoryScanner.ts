@@ -17,7 +17,7 @@ export function validateRepository(repository: string) {
 export async function runRepositoryScan(job: ScanJob) {
   job.status = "running";
   job.updatedAt = new Date().toISOString();
-  saveJob(job);
+  await saveJob(job);
   try {
     job.result = await runIsolatedRepositoryScan(job);
     job.status = "completed";
@@ -26,7 +26,7 @@ export async function runRepositoryScan(job: ScanJob) {
     job.error = reason instanceof Error ? reason.message : "Repository scan failed";
   } finally {
     job.updatedAt = new Date().toISOString();
-    saveJob(job);
+    await saveJob(job);
   }
 }
 

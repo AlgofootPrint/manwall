@@ -41,6 +41,20 @@ Build the local isolated runner before starting repository jobs:
 docker build -f Dockerfile.runner -t manwall-scan-runner:local .
 ```
 
+The runner pins Foundry to an immutable official image digest and includes
+Slither `0.11.5`. Tool execution remains inside the restricted no-network
+analysis container.
+
+Start local PostgreSQL and S3-compatible evidence storage:
+
+```bash
+docker compose -f compose.infrastructure.yml up -d
+```
+
+PostgreSQL listens only on `127.0.0.1:5432`. MinIO's S3 endpoint and local
+console listen only on `127.0.0.1:9000` and `127.0.0.1:9001`. The compose
+defaults are local-development credentials and must not be used in production.
+
 ## Wallet Approval
 
 The web interface supports MetaMask-compatible injected wallets:
