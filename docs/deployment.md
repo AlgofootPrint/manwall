@@ -37,10 +37,16 @@ Worker:
 
 ## Deployment blockers
 
-- Railway CLI authentication must be completed interactively with
-  `railway login`.
+- Railway project `manwall`, service `manwall-api`, evidence bucket
+  `manwall-evidence`, and public domain
+  `https://manwall-api-production.up.railway.app` have been created.
+- Railway free-tier deploys are blocked during peak hours
+  (`8 AM - 8 PM Europe/Amsterdam`). Retry the API deploy off-peak with:
+  `railway up -s manwall-api -d`.
+- Railway PostgreSQL provisioning currently returns an authorization error
+  despite valid CLI authentication. Retry off-peak or configure an external
+  managed PostgreSQL provider.
 - A dedicated Linux Docker worker host and its provider/account must be chosen.
-- A production Cloudflare R2 bucket and scoped S3 credentials must be created.
 - Production PostgreSQL and S3 credentials must replace all local defaults.
 - The scan-runner image must be published to a private registry accessible by
   the worker host.
