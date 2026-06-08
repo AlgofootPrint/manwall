@@ -1,0 +1,11 @@
+node_modules
+dist
+artifacts
+.env
+*.log
+*.tsbuildinfo
+tests/*.js
+tests/*.d.ts
+data/reports
+data/jobs
+data/workspaces
