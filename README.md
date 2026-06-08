@@ -33,7 +33,13 @@ Every report is persisted under `data/reports` and is retrievable through:
 - `POST /api/jobs/repository` to scan a public GitHub repository
 - `GET /api/jobs/:jobId` to retrieve durable repository job results
 
-Repository jobs accept only public `https://github.com/owner/repository` URLs, use shallow clones, limit Solidity file count and source size, record the scanned commit, and persist results under `data/jobs`.
+Repository jobs accept only public `https://github.com/owner/repository` URLs. A restricted clone container fetches a shallow snapshot, then a separate no-network container scans it with a read-only root filesystem, dropped Linux capabilities, and CPU, memory, process, and timeout limits. Results record the scanned commit and persist under `data/jobs`.
+
+Build the local isolated runner before starting repository jobs:
+
+```bash
+docker build -f Dockerfile.runner -t manwall-scan-runner:local .
+```
 
 ## Wallet Approval
 

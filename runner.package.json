@@ -1,0 +1,10 @@
+{
+  "name": "manwall-scan-runner",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ethers": "6.15.0",
+    "solc": "0.8.30",
+    "tsx": "4.19.2"
+  }
+}
