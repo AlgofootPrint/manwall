@@ -1,0 +1,92 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      INLINE_REPOSITORY_JOBS: "false"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-manwall}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-manwall}
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-manwall-evidence}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      create-evidence-bucket:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-manwall}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-manwall}
+      SCAN_RUNNER_IMAGE: ${SCAN_RUNNER_IMAGE:-manwall-scan-runner:local}
+      SCAN_RUNNER_TIMEOUT_MS: ${SCAN_RUNNER_TIMEOUT_MS:-180000}
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-2000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-manwall}
+      POSTGRES_USER: ${POSTGRES_USER:-manwall}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-manwall} -d ${POSTGRES_DB:-manwall}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - manwall-production-postgres:/var/lib/postgresql/data
+      - ./server/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY}
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - manwall-production-minio:/data
+    restart: unless-stopped
+
+  create-evidence-bucket:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        mc alias set local http://minio:9000
+        ${S3_ACCESS_KEY_ID}
+        ${S3_SECRET_ACCESS_KEY}
+        && mc mb --ignore-existing local/${S3_BUCKET:-manwall-evidence}
+
+volumes:
+  manwall-production-postgres:
+  manwall-production-minio:

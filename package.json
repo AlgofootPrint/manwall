@@ -7,6 +7,7 @@
     "dev": "concurrently \"tsx watch server/index.ts\" \"vite\"",
     "build": "tsc -b && vite build",
     "start": "tsx server/index.ts",
+    "start:worker": "tsx server/worker.ts",
     "test": "tsx server/selftest.ts",
     "demo": "tsx server/demo.ts",
     "compile:contracts": "tsx server/compile.ts"
@@ -22,6 +23,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "solc": "^0.8.30",
+    "tsx": "^4.19.2",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -34,7 +36,6 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "ganache": "^7.9.2",
-    "tsx": "^4.19.2",
     "typescript": "~5.7.2",
     "vite": "^6.1.0",
     "vitest": "^2.1.8"

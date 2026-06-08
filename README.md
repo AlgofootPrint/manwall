@@ -55,6 +55,27 @@ PostgreSQL listens only on `127.0.0.1:5432`. MinIO's S3 endpoint and local
 console listen only on `127.0.0.1:9000` and `127.0.0.1:9001`. The compose
 defaults are local-development credentials and must not be used in production.
 
+## Production Services
+
+Production separates the public API from the Docker-enabled worker:
+
+- `Dockerfile.api` serves the frontend and API, queues repository jobs, and never
+  receives Docker socket access.
+- `Dockerfile.worker` claims queued jobs from PostgreSQL and is the only service
+  permitted to access the Docker daemon.
+- `compose.production.yml` is a local production-parity deployment used to verify
+  the split before configuring managed hosts.
+
+Use strong non-default PostgreSQL and S3 credentials, then start:
+
+```bash
+docker compose --env-file .env -f compose.production.yml up -d --build
+```
+
+The API readiness endpoint is `GET /api/ready`. Public production deployment
+requires separate API and worker hosts; do not mount the Docker socket into the
+public API service.
+
 ## Wallet Approval
 
 The web interface supports MetaMask-compatible injected wallets:

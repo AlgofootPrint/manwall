@@ -68,6 +68,35 @@ export async function listJobRecords(): Promise<ScanJob[] | null> {
   return Promise.all(result.rows.map((row) => getJobRecord(row.id))) as Promise<ScanJob[]>;
 }
 
+export async function claimNextJobRecord(): Promise<ScanJob | null> {
+  const client = database();
+  if (!client) return null;
+  const result = await client.query(`
+    UPDATE scan_jobs
+    SET status = 'running', updated_at = now()
+    WHERE id = (
+      SELECT id
+      FROM scan_jobs
+      WHERE status = 'queued'
+      ORDER BY created_at
+      FOR UPDATE SKIP LOCKED
+      LIMIT 1
+    )
+    RETURNING *
+  `);
+  const row = result.rows[0];
+  return row ? {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    repository: row.repository,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+    error: row.error ?? undefined,
+    result: row.result ?? undefined
+  } : null;
+}
+
 export async function saveReportRecord(report: { scanId: string; createdAt?: string; completedAt?: string }) {
   const client = database();
   const createdAt = report.createdAt ?? report.completedAt ?? new Date().toISOString();

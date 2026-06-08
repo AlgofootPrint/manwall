@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import { spawn } from "node:child_process";
 import type { ScanJob } from "./jobStore.js";
 
@@ -41,31 +39,29 @@ const restrictions = [
 ];
 
 export async function runIsolatedRepositoryScan(job: ScanJob) {
-  const jobRoot = path.resolve("data", "workspaces", job.id);
-  const repositoryRoot = path.join(jobRoot, "repository");
-  const outputRoot = path.join(jobRoot, "output");
-  fs.mkdirSync(jobRoot, { recursive: true });
-  fs.mkdirSync(outputRoot, { recursive: true });
-
   const cloneContainer = `manwall-${job.id.toLowerCase()}-clone`;
   const scanContainer = `manwall-${job.id.toLowerCase()}-scan`;
+  const volume = `manwall-${job.id.toLowerCase()}-workspace`;
 
-  await docker([
-    "run", ...restrictions,
-    "--name", cloneContainer,
-    "--network", "bridge",
-    "--mount", `type=bind,source=${jobRoot},target=/workspace`,
-    image, "clone", job.repository
-  ], cloneContainer);
+  await docker(["volume", "create", volume], cloneContainer);
+  try {
+    await docker([
+      "run", ...restrictions,
+      "--name", cloneContainer,
+      "--network", "bridge",
+      "--mount", `type=volume,source=${volume},target=/workspace`,
+      image, "clone", job.repository
+    ], cloneContainer);
 
-  await docker([
-    "run", ...restrictions,
-    "--name", scanContainer,
-    "--network", "none",
-    "--mount", `type=bind,source=${repositoryRoot},target=/workspace/repository,readonly`,
-    "--mount", `type=bind,source=${outputRoot},target=/output`,
-    image, "scan"
-  ], scanContainer);
-
-  return JSON.parse(fs.readFileSync(path.join(outputRoot, "result.json"), "utf8")) as NonNullable<ScanJob["result"]>;
+    const result = await docker([
+      "run", ...restrictions,
+      "--name", scanContainer,
+      "--network", "none",
+      "--mount", `type=volume,source=${volume},target=/workspace,readonly`,
+      image, "scan"
+    ], scanContainer);
+    return JSON.parse(result) as NonNullable<ScanJob["result"]>;
+  } finally {
+    await docker(["volume", "rm", "-f", volume], scanContainer);
+  }
 }

@@ -23,5 +23,6 @@ RUN npm install --no-package-lock
 
 COPY server ./server
 COPY tsconfig.node.json ./
+RUN mkdir -p /workspace && chown node:node /workspace
 
 ENTRYPOINT ["node", "--import", "tsx", "server/containerRunner.ts"]

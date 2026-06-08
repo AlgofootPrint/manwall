@@ -48,7 +48,7 @@ async function scan() {
     if (Buffer.byteLength(source) > maxSourceBytes) throw new Error(`${path.basename(file)} exceeds source size limit.`);
     return analyzeSource(path.relative(root, file).replaceAll("\\", "/"), source);
   });
-  fs.writeFileSync("/output/result.json", JSON.stringify({
+  console.log(JSON.stringify({
     commit,
     filesScanned: files.length,
     findings: reports.reduce((total, report) => total + report.findings.length, 0),
