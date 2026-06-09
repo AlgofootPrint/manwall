@@ -51,15 +51,11 @@ export function useWallet() {
 
   useEffect(() => {
     if (!window.ethereum) return;
-    void window.ethereum.request({
-      method: "wallet_revokePermissions",
-      params: [{ eth_accounts: {} }]
-    }).catch(() => undefined);
     const accountsChanged = (accounts: string[]) => {
-      if (!disconnectedByUser.current) void refresh(accounts[0] ?? "");
+      if (!disconnectedByUser.current) void refresh(accounts[0] ?? "").catch(() => undefined);
     };
     const chainChanged = () => {
-      if (!disconnectedByUser.current) void refresh();
+      if (!disconnectedByUser.current) void refresh().catch(() => undefined);
     };
     window.ethereum.on?.("accountsChanged", accountsChanged);
     window.ethereum.on?.("chainChanged", chainChanged);

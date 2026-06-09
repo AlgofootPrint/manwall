@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown, ArrowRight, Check, ChevronRight, CircleDot, ExternalLink,
   Fingerprint, GitBranch, GitPullRequest, Play, ShieldCheck, Terminal, Wallet
@@ -62,7 +62,7 @@ type RepositoryReport = {
   gasOptimizations: GasOptimization[];
 };
 type RepositoryJob = {
-  id: string; status: "queued" | "running" | "completed" | "failed"; repository: string; error?: string;
+  id: string; status: "queued" | "running" | "completed" | "failed"; repository: string; updatedAt?: string; error?: string;
   result?: {
     commit: string; filesScanned: number; findings: number;
     summary?: { securityFindings: number; gasOptimizations: number; compilationFailures: number; toolFailures: number };
@@ -139,6 +139,14 @@ const toolStatusLabels: Record<RepositoryToolResult["status"], string> = {
 const toolStatusLabel = (status?: RepositoryToolResult["status"]) => status ? toolStatusLabels[status] : "Not reported";
 const oauthStateKey = "manwall:oauth-return-state";
 const pendingAiKey = "manwall:pending-ai-action";
+const parseSessionJson = <T,>(key: string, fallback: T): T => {
+  try {
+    return JSON.parse(sessionStorage.getItem(key) ?? "") as T;
+  } catch {
+    sessionStorage.removeItem(key);
+    return fallback;
+  }
+};
 
 export default function App() {
   const [enteredApp, setEnteredApp] = useState(false);
@@ -164,21 +172,30 @@ export default function App() {
   const [aiResults, setAiResults] = useState<Record<string, AiResult>>({});
   const [aiStatus, setAiStatus] = useState<Record<string, string>>({});
   const [returnSection, setReturnSection] = useState("");
+  const activeRequests = useRef(0);
   const wallet = useWallet();
 
   useEffect(() => {
-    fetch("/api/capabilities").then((response) => response.json()).then(setCapabilities).catch(() => undefined);
-    fetch("/api/auth/me", { credentials: "include" }).then((response) => response.json()).then((nextActor: Actor) => {
+    fetch("/api/capabilities").then((response) => {
+      if (!response.ok) throw new Error(`Capabilities request failed with HTTP ${response.status}.`);
+      return response.json();
+    }).then(setCapabilities).catch(() => undefined);
+    fetch("/api/auth/me", { credentials: "include" }).then((response) => {
+      if (!response.ok) throw new Error(`Authentication request failed with HTTP ${response.status}.`);
+      return response.json();
+    }).then((nextActor: Actor) => {
       setActor(nextActor);
       const oauthReturned = new URLSearchParams(window.location.search).get("oauth") === "github";
-      const pending = JSON.parse(sessionStorage.getItem(pendingAiKey) ?? "null") as {
+      const pending = parseSessionJson<{
         workflow: "review"; key: string; payload: Record<string, unknown>;
-      } | null;
+      } | null>(pendingAiKey, null);
       if (!nextActor.authenticated) {
         if (oauthReturned && pending) {
           const message = "GitHub authorization returned without a usable session. Check the OAuth callback configuration and authorize again.";
           setError(message);
           setAiStatus((current) => ({ ...current, [pending.key]: message }));
+          sessionStorage.removeItem(pendingAiKey);
+          window.history.replaceState({}, "", `${window.location.pathname}${window.location.hash}`);
         }
         return;
       }
@@ -226,19 +243,42 @@ export default function App() {
   }, [wallet.account, report?.scanId]);
 
   useEffect(() => {
+    if (walletScan && walletScan.wallet.toLowerCase() !== wallet.account.toLowerCase()) setWalletScan(null);
+  }, [wallet.account, walletScan]);
+
+  useEffect(() => {
     const activeJobs = repositoryJobs.filter((job) => ["queued", "running"].includes(job.status));
     if (!activeJobs.length) return;
     const timer = window.setInterval(() => {
-      void Promise.all(activeJobs.map((job) => fetch(`/api/jobs/${job.id}`).then((response) => response.json())))
-        .then((updates) => setRepositoryJobs((current) => current.map((job) => updates.find((update) => update.id === job.id) ?? job)))
-        .catch(() => undefined);
+      void Promise.all(activeJobs.map(async (job) => {
+        const response = await fetch(`/api/jobs/${job.id}`);
+        const body = await response.json().catch(() => ({})) as RepositoryJob & { error?: string };
+        if (response.status === 404) return { ...job, status: "failed" as const, error: "Repository scan job no longer exists." };
+        if (!response.ok) throw new Error(body.error ?? `Job status request failed with HTTP ${response.status}.`);
+        return body;
+      }))
+        .then((updates) => {
+          setRepositoryJobs((current) => current.map((job) => updates.find((update) => update.id === job.id) ?? job));
+          setRepositoryStatus("");
+        })
+        .catch((reason) => setRepositoryStatus(`Unable to refresh scan status: ${reason instanceof Error ? reason.message : "request failed"}`));
     }, 2000);
     return () => window.clearInterval(timer);
   }, [repositoryJobs]);
 
-  async function request(path: string, options?: RequestInit) {
+  function beginRequest() {
+    activeRequests.current += 1;
     setRunning(true);
     setError("");
+  }
+
+  function finishRequest() {
+    activeRequests.current = Math.max(0, activeRequests.current - 1);
+    if (activeRequests.current === 0) setRunning(false);
+  }
+
+  async function request(path: string, options?: RequestInit) {
+    beginRequest();
     try {
       const response = await fetch(path, options);
       if (!response.ok) {
@@ -254,7 +294,7 @@ export default function App() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Analysis failed");
     } finally {
-      setRunning(false);
+      finishRequest();
     }
   }
 
@@ -350,10 +390,8 @@ export default function App() {
   }
 
   async function executeAi(workflow: "review" | "patch", key: string, payload: Record<string, unknown>) {
-    const target = payload.repository ? "#repository" : "#workbench";
     setAiStatus((current) => ({ ...current, [key]: workflow === "review" ? "Running AI security review..." : "Generating approved patch draft..." }));
-    setRunning(true);
-    setError("");
+    beginRequest();
     try {
       const response = await fetch(`/api/ai/${workflow}`, {
         method: "POST",
@@ -376,7 +414,7 @@ export default function App() {
       setAiStatus((current) => ({ ...current, [key]: `AI request failed: ${message}` }));
       if (workflow === "review") sessionStorage.removeItem(pendingAiKey);
     } finally {
-      setRunning(false);
+      finishRequest();
     }
   }
 
@@ -777,8 +815,12 @@ export default function App() {
                 <Record label="Scan" value={report?.scanId ?? "Awaiting proof"} />
                 <Record label="Target" value={report ? short(report.target.address) : "Awaiting proof"} />
                 <Record label="Identity" value={report?.attestation.identityURI ?? "manwall://mantle/security-engineer/v1"} />
-                <Record label="Transaction" value={report ? short(report.attestation.transactionHash ?? "") : "Awaiting proof"} />
-                <div className="record-hash"><Fingerprint size={15} /><code>{report?.attestation.evidenceHash ?? "Evidence hash appears after a verified proof run"}</code><ExternalLink size={14} /></div>
+                <Record label="Transaction" value={attestationTransaction ? short(attestationTransaction) : report?.attestation.transactionHash ? short(report.attestation.transactionHash) : "Awaiting publication"} />
+                <div className="record-hash">
+                  <Fingerprint size={15} />
+                  <code>{report?.attestation.evidenceHash ?? "Evidence hash appears after a verified proof run"}</code>
+                  {(attestationTransaction || report?.attestation.transactionHash) && <a href={`https://sepolia.mantlescan.xyz/tx/${attestationTransaction || report?.attestation.transactionHash}`} target="_blank" rel="noreferrer" aria-label="View attestation transaction"><ExternalLink size={14} /></a>}
+                </div>
               </div>
               <div className="wallet-panel" id="wallet-scan">
                 <div className="wallet-heading">
@@ -842,7 +884,7 @@ export default function App() {
                       <p className="wallet-note">Your wallet signs the exact evidence approval without spending gas. After verification, Manwall's funded publisher wallet pays the Mantle Sepolia gas and submits the public attestation transaction.</p>
                       {attestationStatus && <p className="wallet-note">{attestationStatus}</p>}
                       {attestationPublisher && <p className="wallet-note">Publisher: {attestationPublisher}</p>}
-                      {attestationTransaction && <a className="wallet-explorer-link" href={`https://explorer.sepolia.mantle.xyz/tx/${attestationTransaction}`} target="_blank" rel="noreferrer">View attestation on Mantle explorer <ExternalLink size={13} /></a>}
+                      {attestationTransaction && <a className="wallet-explorer-link" href={`https://sepolia.mantlescan.xyz/tx/${attestationTransaction}`} target="_blank" rel="noreferrer">View attestation on Mantle explorer <ExternalLink size={13} /></a>}
                     </>}
                 {wallet.error && <p className="wallet-error">{wallet.error}</p>}
               </div>
