@@ -5,7 +5,7 @@ import { githubLogin, monitoredRepositories, repositoryAuthorized, safeOAuthRetu
 import { publishAttestation } from "../server/attestation.js";
 import { createRemediationPullRequest, getGitHubRepositorySnapshot, shouldScanGitHubEvent } from "../server/github.js";
 import { sendTelegram } from "../server/notifications.js";
-import { consumeTelegramApproval, createTelegramApproval, decideTelegramApproval, handleTelegramUpdate, parseTelegramPrCommand, verifyTelegramWebhookSecret } from "../server/telegramApprovals.js";
+import { consumeTelegramApproval, createTelegramApproval, decideTelegramApproval, handleTelegramCallback, handleTelegramUpdate, parseTelegramPrCommand, verifyTelegramWebhookSecret } from "../server/telegramApprovals.js";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = { ...process.env };
@@ -284,8 +284,37 @@ describe("production approval foundations", () => {
     expect(result.command).toBe("error");
     expect(result.error).toContain("authorized Telegram approver");
     expect(result.error).toContain("https://t.me/c/123/15");
-    expect(messages.some((message) => message.includes("Repository scan approval needed"))).toBe(true);
-    expect(messages.some((message) => message.includes("Open the approval alert: https://t.me/c/123/15"))).toBe(true);
+    expect(messages.some((message) => message.includes("Manwall approval required"))).toBe(true);
+    expect(messages.some((message) => message.includes("Open the approval request: https://t.me/c/123/15"))).toBe(true);
+  });
+
+  it("queues the exact unmonitored repository after an approver taps Approve", async () => {
+    delete process.env.DATABASE_URL;
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+    process.env.TELEGRAM_CHAT_ID = "-100123";
+    process.env.TELEGRAM_APPROVER_USER_IDS = "42";
+    process.env.MANTLE_MONITORED_REPOSITORIES = "merchant-moe/moe-core";
+    globalThis.fetch = async () => Response.json({ ok: true, result: { message_id: 16 } });
+
+    const request = await handleTelegramUpdate({
+      message: { text: "/scan https://github.com/example/public-contracts", chat: { id: "-100123" }, from: { id: "7" } }
+    }) as any;
+    const approvalId = String(request.error).match(/Approval ID: ([0-9a-f-]{36})/i)?.[1];
+    expect(approvalId).toBeTruthy();
+
+    const result = await handleTelegramCallback({
+      callback_query: {
+        id: "callback-1",
+        data: `ma:a:${approvalId}`,
+        from: { id: "42" },
+        message: { chat: { id: "-100123" } }
+      }
+    }) as any;
+
+    expect(result.approval.status).toBe("approved");
+    expect(result.job.status).toBe("queued");
+    expect(result.job.repository).toBe("https://github.com/example/public-contracts.git");
+    await expect(consumeTelegramApproval(approvalId!, "repository.scan", { repository: "https://github.com/example/public-contracts.git" })).rejects.toThrow("consumed");
   });
 
   it("limits Telegram AI review to authorized approvers", async () => {

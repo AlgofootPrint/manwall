@@ -10,7 +10,7 @@ import { createRepositoryJob } from "./repositoryScanner.js";
 import { analyzeSource } from "./sourceScanner.js";
 import { scanWallet } from "./walletScanner.js";
 
-export type TelegramApprovalAction = "ai.patch" | "github.remediation-pr";
+export type TelegramApprovalAction = "ai.patch" | "github.remediation-pr" | "repository.scan";
 export type TelegramApprovalStatus = "pending" | "approved" | "rejected" | "consumed" | "expired";
 
 export interface TelegramApproval {
@@ -198,6 +198,19 @@ export async function handleTelegramCallback(update: any) {
     await sendTelegramMessage(`Draft PR created: ${String(pr.html_url ?? "")}`);
     return { handled: true, approval: result, pullRequest: pr };
   }
+  if (result.status === "approved" && result.requestedBy.startsWith("telegram:") && result.action === "repository.scan") {
+    const payload = await getTelegramApprovalPayload(result.id) as { repository?: string } | undefined;
+    if (!payload?.repository) throw new Error("Telegram repository scan payload is unavailable.");
+    await consumeTelegramApproval(result.id, result.action, payload);
+    const job = createRepositoryJob(payload.repository);
+    if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
+      throw new Error("Repository hourly scan quota reached.");
+    }
+    await saveJob(job);
+    await writeOperationAudit(result.requestedBy, "repository.scan.request", job.repository, "queued", { jobId: job.id, approvalId: result.id });
+    await sendTelegramMessage(`Repository scan approved and queued.\n${job.id}\n${job.repository}\nUse Check Scan Status and paste ${job.id}`);
+    return { handled: true, approval: result, job };
+  }
   return { handled: true, approval: result };
 }
 
@@ -269,14 +282,11 @@ function telegramGroupMessageLink(messageId: string) {
 }
 
 async function requestRepositoryScanApproval(repository: string, userId: string) {
-  const messageId = await sendTelegramChatMessage(String(process.env.TELEGRAM_CHAT_ID), [
-    "Repository scan approval needed",
-    `Repository: ${repository}`,
-    `Requested by Telegram user: ${userId}`,
-    "",
-    "An authorized approver can tap Scan Repository and paste this URL to approve and queue the isolated scan."
-  ].join("\n"), telegramMenu);
-  return telegramGroupMessageLink(messageId);
+  const approval = await createTelegramApproval("repository.scan", repository, { repository }, `telegram:${userId}`);
+  return {
+    approval,
+    alertLink: telegramGroupMessageLink(approval.telegramMessageId ?? "")
+  };
 }
 
 function commandArgument(text: string, command: string) {
@@ -352,11 +362,12 @@ async function handleTelegramCommand(text: string, chatId: string, userId: strin
   if (repository) {
     const job = createRepositoryJob(repository);
     if (!allowedApprover(userId) && !monitoredRepositories().includes(normalizeRepositoryName(job.repository).toLowerCase())) {
-      const alertLink = await requestRepositoryScanApproval(job.repository, userId);
+      const { approval, alertLink } = await requestRepositoryScanApproval(job.repository, userId);
       throw new Error([
         "This repository is not monitored, so an authorized Telegram approver must submit it.",
+        `Approval ID: ${approval.id}`,
         alertLink
-          ? `Open the approval alert: ${alertLink}`
+          ? `Open the approval request: ${alertLink}`
           : "An approval alert was posted in this Manwall group. Direct alert links require the group to be upgraded to a Telegram supergroup."
       ].join("\n"));
     }

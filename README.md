@@ -102,7 +102,8 @@ review remains restricted to `TELEGRAM_APPROVER_USER_IDS`.
 When a regular user requests an unmonitored repository, Manwall posts an
 approval-needed group alert and returns a direct link when the configured chat
 is a Telegram supergroup or `TELEGRAM_GROUP_ALERT_URL` is configured. Legacy
-basic groups do not support direct message links.
+basic groups do not support direct message links. The alert includes one-time
+Approve and Reject buttons; approval queues that exact repository URL.
 Telegram commands cannot edit application, server, or contract code.
 
 Production repository submissions require an authenticated GitHub OAuth session
