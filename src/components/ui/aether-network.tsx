@@ -33,6 +33,7 @@ export function AetherNetwork({
     let width = 0;
     let height = 0;
     let frame = 0;
+    let clearTimer = 0;
 
     const initialize = () => {
       const bounds = container.getBoundingClientRect();
@@ -123,12 +124,38 @@ export function AetherNetwork({
       if (!reducedMotion) frame = requestAnimationFrame(draw);
     };
 
-    const handlePointer = (event: PointerEvent) => {
+    const updatePointer = (clientX: number, clientY: number) => {
+      window.clearTimeout(clearTimer);
       const bounds = canvas.getBoundingClientRect();
-      pointer.x = event.clientX - bounds.left;
-      pointer.y = event.clientY - bounds.top;
+      const x = clientX - bounds.left;
+      const y = clientY - bounds.top;
+      if (x < 0 || x > bounds.width || y < 0 || y > bounds.height) {
+        pointer.x = -1000;
+        pointer.y = -1000;
+        return;
+      }
+      pointer.x = x;
+      pointer.y = y;
     };
-    const clearPointer = () => {
+    const handlePointer = (event: PointerEvent) => updatePointer(event.clientX, event.clientY);
+    const handleTouch = (event: TouchEvent) => {
+      const touch = event.touches[0] ?? event.changedTouches[0];
+      if (touch) updatePointer(touch.clientX, touch.clientY);
+    };
+    const clearPointer = (delay = 0) => {
+      window.clearTimeout(clearTimer);
+      clearTimer = window.setTimeout(() => {
+        pointer.x = -1000;
+        pointer.y = -1000;
+      }, delay);
+    };
+    const handlePointerEnd = (event: PointerEvent) => {
+      if (event.pointerType === "touch") clearPointer(180);
+    };
+    const handleTouchEnd = () => {
+      clearPointer(180);
+    };
+    const handleWindowLeave = () => {
       pointer.x = -1000;
       pointer.y = -1000;
     };
@@ -138,15 +165,30 @@ export function AetherNetwork({
       if (reducedMotion) draw();
     });
     observer.observe(container);
+    window.addEventListener("pointerdown", handlePointer, { passive: true });
     window.addEventListener("pointermove", handlePointer);
-    window.addEventListener("pointerleave", clearPointer);
+    window.addEventListener("pointerup", handlePointerEnd, { passive: true });
+    window.addEventListener("pointercancel", handlePointerEnd, { passive: true });
+    window.addEventListener("touchstart", handleTouch, { passive: true });
+    window.addEventListener("touchmove", handleTouch, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+    document.documentElement.addEventListener("mouseleave", handleWindowLeave);
     initialize();
     draw();
 
     return () => {
       observer.disconnect();
+      window.clearTimeout(clearTimer);
+      window.removeEventListener("pointerdown", handlePointer);
       window.removeEventListener("pointermove", handlePointer);
-      window.removeEventListener("pointerleave", clearPointer);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+      window.removeEventListener("touchstart", handleTouch);
+      window.removeEventListener("touchmove", handleTouch);
+      window.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("touchcancel", handleTouchEnd);
+      document.documentElement.removeEventListener("mouseleave", handleWindowLeave);
       cancelAnimationFrame(frame);
     };
   }, [color, highlightColor]);
