@@ -32,7 +32,7 @@ export interface ScanJob {
 }
 
 export interface ToolResult {
-  status: "passed" | "failed" | "skipped";
+  status: "passed" | "blocked" | "failed" | "skipped";
   findings: number;
   summary: string;
   output: string;

@@ -123,7 +123,7 @@ export function normalizeFoundryResult(result: CommandResult): ToolResult {
   const failureLines = output.split(/\r?\n/).filter((line) => line.includes("[FAIL:"));
   if (failed > 0 && failureLines.length > 0 && failureLines.every((line) => /vm\.createSelectFork:.*(?:failed to lookup address|could not resolve host|error sending request)/i.test(line))) {
     return {
-      status: "failed",
+      status: "blocked",
       findings: 0,
       summary: `Foundry ran ${passed + failed} tests: ${passed} passed and ${failed} fork-dependent test${failed === 1 ? "" : "s"} could not run because isolated scans block RPC network access.`,
       output: truncate(output)

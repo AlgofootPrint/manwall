@@ -53,7 +53,7 @@ type SourceAnalysis = {
 };
 type Capability = { id: string; name: string; status: "ready" | "configuration-required" | "unavailable"; detail: string };
 type RepositoryToolResult = {
-  status: "passed" | "failed" | "skipped"; findings: number; summary: string; output: string;
+  status: "passed" | "blocked" | "failed" | "skipped"; findings: number; summary: string; output: string;
 };
 type RepositoryReport = {
   target: { name: string };
@@ -126,6 +126,17 @@ const fallbackAgents = [
 const short = (value: string) => value.length > 22 ? `${value.slice(0, 11)}...${value.slice(-8)}` : value;
 const repositoryCommitUrl = (repository: string, commit: string) =>
   `${repository.replace(/\.git$/, "")}/commit/${encodeURIComponent(commit)}`;
+const displayedToolStatus = (tool?: RepositoryToolResult): RepositoryToolResult["status"] | undefined =>
+  tool?.status === "failed" && /fork-dependent|isolated scans block RPC network access/i.test(tool.summary)
+    ? "blocked"
+    : tool?.status;
+const toolStatusLabels: Record<RepositoryToolResult["status"], string> = {
+  passed: "Passed",
+  blocked: "Blocked by isolation",
+  failed: "Failed to complete",
+  skipped: "Not applicable"
+};
+const toolStatusLabel = (status?: RepositoryToolResult["status"]) => status ? toolStatusLabels[status] : "Not reported";
 const oauthStateKey = "manwall:oauth-return-state";
 const pendingAiKey = "manwall:pending-ai-action";
 
@@ -563,9 +574,13 @@ export default function App() {
                   <div className="job-metrics">
                     <div><span>Compile failures</span><b>{repositoryJob.result.summary?.compilationFailures ?? repositoryJob.result.reports?.filter((item) => !item.compilation.passed).length ?? 0}</b></div>
                     <div><span>Gas suggestions</span><b>{repositoryJob.result.summary?.gasOptimizations ?? repositoryJob.result.reports?.reduce((total, item) => total + item.gasOptimizations.length, 0) ?? 0}</b></div>
-                    <div><span>Slither</span><b>{repositoryJob.result.tools?.slither.status ?? "not reported"}</b></div>
-                    <div><span>Foundry</span><b>{repositoryJob.result.tools?.foundry.status ?? "not reported"}</b></div>
+                    <div><span>Slither</span><b>{toolStatusLabel(displayedToolStatus(repositoryJob.result.tools?.slither))}</b></div>
+                    <div><span>Foundry</span><b>{toolStatusLabel(displayedToolStatus(repositoryJob.result.tools?.foundry))}</b></div>
                   </div>
+                  {repositoryJob.result.tools && <div className="tool-status-explanations">
+                    <p><b>Slither: {toolStatusLabel(displayedToolStatus(repositoryJob.result.tools.slither))}.</b> {repositoryJob.result.tools.slither.summary}</p>
+                    <p><b>Foundry: {toolStatusLabel(displayedToolStatus(repositoryJob.result.tools.foundry))}.</b> {repositoryJob.result.tools.foundry.summary}</p>
+                  </div>}
                   <details>
                     <summary>Inspect scan evidence</summary>
                     <div className="job-evidence">

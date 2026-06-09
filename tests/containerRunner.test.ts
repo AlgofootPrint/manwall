@@ -38,7 +38,7 @@ describe("isolated tool result normalization", () => {
       stderr: ""
     });
 
-    expect(result.status).toBe("failed");
+    expect(result.status).toBe("blocked");
     expect(result.findings).toBe(0);
     expect(result.summary).toContain("fork-dependent");
     expect(result.summary).not.toContain("compiler");
