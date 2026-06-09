@@ -104,6 +104,9 @@ export async function runGuardianScan(): Promise<ScanReport> {
   const vulnerable = await deploy(artifacts.VulnerableVault, deployer);
   const vulnerableAddress = await vulnerable.getAddress();
   await (await vulnerable.connect(victim).deposit({ value: 10n * 10n ** 18n })).wait();
+  const cleanUser = await provider.getSigner(3);
+  await (await vulnerable.connect(cleanUser).deposit({ value: 10n ** 18n })).wait();
+  const vulnerableWithdrawReceipt = await (await vulnerable.connect(cleanUser).withdraw()).wait();
   const attacker = await deploy(artifacts.ReentrancyAttacker, attackerOwner, [vulnerableAddress]);
   const beforeAttack = await provider.getBalance(await attacker.getAddress());
 
@@ -174,8 +177,7 @@ export async function runGuardianScan(): Promise<ScanReport> {
   ));
 
   started = Date.now();
-  const gasVulnerable = BigInt(attackReceipt?.gasUsed ?? 0);
-  const cleanUser = await provider.getSigner(3);
+  const gasVulnerable = BigInt(vulnerableWithdrawReceipt?.gasUsed ?? 0);
   await (await secured.connect(cleanUser).deposit({ value: 10n ** 18n })).wait();
   const securedWithdrawReceipt = await (await secured.connect(cleanUser).withdraw()).wait();
   const gasSecured = BigInt(securedWithdrawReceipt?.gasUsed ?? 0);
@@ -188,7 +190,7 @@ export async function runGuardianScan(): Promise<ScanReport> {
     started,
     `Secured withdrawal uses ${gasSecured.toString()} gas on the local Mantle-compatible EVM, with reviewable optimization guidance kept separate from security proof.`,
     [
-      `Exploit transaction gas: ${gasVulnerable.toString()}`,
+      `Original normal withdrawal gas: ${gasVulnerable.toString()}`,
       `Secured normal withdrawal gas: ${gasSecured.toString()}`,
       `Measured delta: ${delta.toFixed(2)}%`,
       mantleFeeEstimate.status === "live"

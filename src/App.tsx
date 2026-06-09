@@ -756,7 +756,7 @@ export default function App() {
                 <Stat index="01" label="Exploit proof" value={report?.verdict.exploitConfirmed ? "Confirmed" : "Pending"} active={!!report?.verdict.exploitConfirmed} />
                 <Stat index="02" label="Patch replay" value={report?.verdict.patchVerified ? "Blocked" : "Pending"} active={!!report?.verdict.patchVerified} />
                 <Stat index="03" label="Value demonstrated" value={report?.verdict.fundsAtRisk ?? "Pending"} />
-                <Stat index="04" label="Mantle gas delta" value={report?.gas.deltaPercent ?? "Pending"} active={!!report} />
+                <Stat index="04" label="Patch gas delta" value={report?.gas.deltaPercent ?? "Pending"} active={!!report} />
               </div>
               {report?.gas.mantleAdvice?.length ? <div className="gas-advice">
                 {report.gas.mantleAdvice.map((item) => <p key={item}>{item}</p>)}
