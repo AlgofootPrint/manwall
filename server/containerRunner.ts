@@ -61,8 +61,19 @@ async function clone(repository: string) {
 }
 
 export function normalizeSlitherResult(result: CommandResult): ToolResult {
+  const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+  const candidates = [result.stdout, result.stderr].filter(Boolean);
   try {
-    const parsed = JSON.parse(result.stdout) as {
+    const json = candidates.find((candidate) => {
+      try {
+        JSON.parse(candidate);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (!json) throw new Error("No valid Slither JSON output.");
+    const parsed = JSON.parse(json) as {
       success?: boolean;
       error?: string;
       results?: { detectors?: unknown[] };
@@ -76,20 +87,23 @@ export function normalizeSlitherResult(result: CommandResult): ToolResult {
         : parsed.success === false
           ? `Slither failed: ${parsed.error ?? "unknown error"}`
           : "Slither completed without findings.",
-      output: truncate(result.stdout || result.stderr)
+      output: truncate(output)
     };
   } catch {
     return {
       status: "failed",
       findings: 0,
       summary: `Slither exited with code ${result.code} without valid JSON output.`,
-      output: truncate(result.stdout || result.stderr)
+      output: truncate(output)
     };
   }
 }
 
 export function normalizeFoundryResult(result: CommandResult): ToolResult {
   const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+  const match = output.match(/(\d+)\s+tests?\s+passed[;,]\s+(\d+)\s+failed/i);
+  const passed = Number(match?.[1] ?? 0);
+  const failed = Number(match?.[2] ?? (result.code === 0 ? 0 : 1));
   if (/SIGKILL|signal:\s*9|out of memory/i.test(output)) {
     return {
       status: "failed",
@@ -98,7 +112,7 @@ export function normalizeFoundryResult(result: CommandResult): ToolResult {
       output: truncate(output)
     };
   }
-  if (/binaries\.soliditylang\.org|failed to lookup address|could not resolve host/i.test(output)) {
+  if (/binaries\.soliditylang\.org|failed to install solc|could not install solc|error downloading compiler/i.test(output)) {
     return {
       status: "failed",
       findings: 0,
@@ -106,8 +120,15 @@ export function normalizeFoundryResult(result: CommandResult): ToolResult {
       output: truncate(output)
     };
   }
-  const match = output.match(/(\d+)\s+tests?\s+passed[;,]\s+(\d+)\s+failed/i);
-  const failed = Number(match?.[2] ?? (result.code === 0 ? 0 : 1));
+  const failureLines = output.split(/\r?\n/).filter((line) => line.includes("[FAIL:"));
+  if (failed > 0 && failureLines.length > 0 && failureLines.every((line) => /vm\.createSelectFork:.*(?:failed to lookup address|could not resolve host|error sending request)/i.test(line))) {
+    return {
+      status: "failed",
+      findings: 0,
+      summary: `Foundry ran ${passed + failed} tests: ${passed} passed and ${failed} fork-dependent test${failed === 1 ? "" : "s"} could not run because isolated scans block RPC network access.`,
+      output: truncate(output)
+    };
+  }
   return {
     status: result.code === 0 ? "passed" : "failed",
     findings: failed,

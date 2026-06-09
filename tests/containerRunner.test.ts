@@ -27,6 +27,23 @@ describe("isolated tool result normalization", () => {
     expect(result.findings).toBe(2);
   });
 
+  it("reports blocked RPC fork tests without treating them as findings or compiler failures", () => {
+    const result = normalizeFoundryResult({
+      code: 1,
+      stdout: [
+        "Suite result: FAILED. 78 tests passed; 5 failed; 0 skipped",
+        "[FAIL: vm.createSelectFork: error sending request; failed to lookup address] test_Deploy()",
+        "[FAIL: vm.createSelectFork: error sending request; failed to lookup address] test_Upgrade()"
+      ].join("\n"),
+      stderr: ""
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.findings).toBe(0);
+    expect(result.summary).toContain("fork-dependent");
+    expect(result.summary).not.toContain("compiler");
+  });
+
   it("does not report an unavailable offline compiler as a failed test", () => {
     const result = normalizeFoundryResult({
       code: 1,
@@ -56,6 +73,17 @@ describe("isolated tool result normalization", () => {
 
     expect(result.status).toBe("failed");
     expect(result.findings).toBe(0);
+  });
+
+  it("accepts Slither JSON written to stderr", () => {
+    const result = normalizeSlitherResult({
+      code: 0,
+      stdout: "",
+      stderr: JSON.stringify({ success: true, results: { detectors: [{ check: "reentrancy-eth" }] } })
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.findings).toBe(1);
   });
 
   it("reports project compilation separately from security findings", () => {
