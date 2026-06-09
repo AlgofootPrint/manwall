@@ -85,7 +85,17 @@ The configured Telegram group can request a constrained draft documentation PR
 with `/pr Title | Description`. Manwall generates a unique `manwall/telegram-*`
 branch and a file under `docs/telegram/`, then requires an authorized Telegram
 approver to approve the exact payload before creating the draft PR. Telegram
-commands cannot edit application, server, or contract code.
+also exposes bounded Manwall workflows to the configured group:
+
+- Paste an EVM address or use `/wallet <address>` to scan Mantle wallet posture.
+- Use `/scan <GitHub URL>` for monitored repositories and `/status <job-id>` for results.
+- Use `/ai <completed job-id>` for an approver-only AI security review.
+- Use `/analyze <Solidity source>` for static source triage.
+- Use `/help` to display the command reference.
+
+Repository scans retain the production hourly quota and execute in the isolated
+VPS worker. AI review remains restricted to `TELEGRAM_APPROVER_USER_IDS`.
+Telegram commands cannot edit application, server, or contract code.
 
 Production repository submissions require an authenticated GitHub OAuth session
 or `X-Manwall-Admin-Key`. Repository access is restricted to

@@ -1,7 +1,14 @@
 import crypto from "node:crypto";
+import { monitoredRepositories, normalizeRepositoryName } from "./auth.js";
+import { runAiWorkflow } from "./ai.js";
 import { databaseClient, writeOperationAudit } from "./infrastructure.js";
+import { recentRepositoryJobCount } from "./infrastructure.js";
 import { createRemediationPullRequest } from "./github.js";
-import { answerTelegramCallback, sendTelegramApproval, sendTelegramMessage, updateTelegramApprovalMessage } from "./notifications.js";
+import { getJob, saveJob, type ScanJob, type ToolResult } from "./jobStore.js";
+import { answerTelegramCallback, sendTelegramApproval, sendTelegramChatMessage, sendTelegramMessage, updateTelegramApprovalMessage } from "./notifications.js";
+import { createRepositoryJob } from "./repositoryScanner.js";
+import { analyzeSource } from "./sourceScanner.js";
+import { scanWallet } from "./walletScanner.js";
 
 export type TelegramApprovalAction = "ai.patch" | "github.remediation-pr";
 export type TelegramApprovalStatus = "pending" | "approved" | "rejected" | "consumed" | "expired";
@@ -111,6 +118,10 @@ function allowedApprover(userId: string) {
   return (process.env.TELEGRAM_APPROVER_USER_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean).includes(userId);
 }
 
+function authorizedTelegramUser(chatId: string, userId: string) {
+  return chatId === String(process.env.TELEGRAM_CHAT_ID) || allowedApprover(userId);
+}
+
 export function verifyTelegramWebhookSecret(value: string | undefined) {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
   return Boolean(secret && value && secret.length === value.length && crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(value)));
@@ -198,22 +209,157 @@ export function parseTelegramPrCommand(text: string, userId: string, username = 
   };
 }
 
+const helpMessage = [
+  "Manwall bot commands",
+  "",
+  "Paste a wallet address or use /wallet <0x address>",
+  "/scan <GitHub repository URL>",
+  "/status <job-id>",
+  "/ai <completed job-id> (authorized approvers only)",
+  "/analyze <Solidity source>",
+  "/pr Title | Description",
+  "",
+  "Repository scans run in the isolated VPS worker. Contract analysis is heuristic source triage, not a confirmed exploit proof."
+].join("\n");
+
+function commandArgument(text: string, command: string) {
+  return text.trim().match(new RegExp(`^/${command}(?:@\\w+)?(?:\\s+([\\s\\S]+))?$`, "i"))?.[1]?.trim() ?? "";
+}
+
+function walletSummary(result: Awaited<ReturnType<typeof scanWallet>>) {
+  const issues = result.issues.slice(0, 5).map((issue) => `- ${issue.severity.toUpperCase()}: ${issue.title}`);
+  return [
+    `Wallet scan: ${result.wallet}`,
+    `Network: ${result.network.name} (${result.network.chainId})`,
+    `Status: ${result.summary}`,
+    `Balance: ${result.nativeBalanceMnt} MNT`,
+    `Account: ${result.accountType}; transactions: ${result.transactionCount}`,
+    `Allowances checked: ${result.allowances.length}`,
+    issues.length ? `Issues:\n${issues.join("\n")}` : "Issues: none detected"
+  ].join("\n");
+}
+
+function toolLabel(tool?: ToolResult) {
+  if (!tool) return "not reported";
+  if (tool.status === "blocked") return `blocked by isolation: ${tool.summary}`;
+  return `${tool.status}: ${tool.summary}`;
+}
+
+function jobSummary(job: ScanJob) {
+  if (!job.result) return `${job.id} / ${job.status}\n${job.repository}${job.error ? `\nError: ${job.error}` : ""}`;
+  return [
+    `${job.id} / ${job.status}`,
+    job.repository,
+    `Commit: ${job.result.commit}`,
+    `Files: ${job.result.filesScanned}; security findings: ${job.result.findings}`,
+    `Slither: ${toolLabel(job.result.tools?.slither)}`,
+    `Foundry: ${toolLabel(job.result.tools?.foundry)}`
+  ].join("\n");
+}
+
+function analysisSummary(result: ReturnType<typeof analyzeSource>) {
+  const findings = result.findings.slice(0, 8).map((finding) => `- ${finding.severity.toUpperCase()} L${finding.line}: ${finding.title}`);
+  return [
+    `Contract analysis: ${result.target.name}`,
+    `Compilation: ${result.compilation.passed ? "passed" : "failed"}`,
+    `Heuristic findings: ${result.findings.length}`,
+    `Mantle gas suggestions: ${result.gasOptimizations.length}`,
+    findings.length ? `Top findings:\n${findings.join("\n")}` : "Top findings: none",
+    `Evidence hash: ${result.evidenceHash}`
+  ].join("\n");
+}
+
+async function handleTelegramCommand(text: string, chatId: string, userId: string) {
+  const reply = (message: string) => sendTelegramChatMessage(chatId, message);
+  if (/^\/(?:start|help)(?:@\w+)?$/i.test(text.trim())) {
+    await reply(helpMessage);
+    return { handled: true, command: "help" };
+  }
+
+  const walletAddress = text.trim().match(/^0x[a-fA-F0-9]{40}$/)?.[0] ?? commandArgument(text, "wallet");
+  if (walletAddress) {
+    if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) throw new Error("Wallet command requires a valid 0x address.");
+    await reply("Scanning wallet posture on Mantle Sepolia...");
+    await reply(walletSummary(await scanWallet(walletAddress)));
+    return { handled: true, command: "wallet" };
+  }
+
+  const repository = commandArgument(text, "scan");
+  if (repository) {
+    const job = createRepositoryJob(repository);
+    if (!monitoredRepositories().includes(normalizeRepositoryName(job.repository).toLowerCase())) {
+      throw new Error("Telegram scans are limited to Manwall's monitored repositories.");
+    }
+    if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
+      throw new Error("Repository hourly scan quota reached.");
+    }
+    await saveJob(job);
+    await reply(`Repository scan queued.\n${job.id}\nUse /status ${job.id}`);
+    return { handled: true, command: "scan", job };
+  }
+
+  const statusId = commandArgument(text, "status").toUpperCase();
+  if (statusId) {
+    const job = await getJob(statusId);
+    if (!job) throw new Error("Repository scan job not found.");
+    await reply(jobSummary(job));
+    return { handled: true, command: "status", job };
+  }
+
+  const aiJobId = commandArgument(text, "ai").toUpperCase();
+  if (aiJobId) {
+    if (!allowedApprover(userId)) throw new Error("AI review is limited to authorized Telegram approvers.");
+    const job = await getJob(aiJobId);
+    if (!job?.result || job.status !== "completed") throw new Error("AI review requires a completed repository scan.");
+    await reply(`Running AI security review for ${job.id}...`);
+    const findings = job.result.reports.flatMap((report: any) => report.findings ?? []).slice(0, 30).map((finding: any) => `${finding.severity}: ${finding.title} at line ${finding.line}`);
+    const result = await runAiWorkflow("review", {
+      subject: `Review repository scan ${job.id}`,
+      repository: job.repository,
+      context: jobSummary(job),
+      findings
+    }, false);
+    await reply([
+      `AI review: ${job.id}`,
+      `Model: ${result.model}; risk: ${result.riskLevel}`,
+      result.summary,
+      ...result.recommendedActions.slice(0, 5).map((action) => `- ${action}`)
+    ].join("\n"));
+    return { handled: true, command: "ai", jobId: job.id };
+  }
+
+  const source = commandArgument(text, "analyze");
+  if (source || text.trim().match(/^\/analyze(?:@\w+)?$/i)) {
+    if (source.length < 20) throw new Error("Send Solidity source after /analyze. Example: /analyze pragma solidity ^0.8.20; contract Example {}");
+    await reply("Running static Solidity analysis...");
+    await reply(analysisSummary(analyzeSource("TelegramSubmission.sol", source)));
+    return { handled: true, command: "analyze" };
+  }
+  return null;
+}
+
 export async function handleTelegramUpdate(update: any) {
   if (update?.callback_query) return handleTelegramCallback(update);
   const message = update?.message;
   const chatId = String(message?.chat?.id ?? "");
-  if (!message?.text || chatId !== String(process.env.TELEGRAM_CHAT_ID)) return { handled: false };
-  if (String(message.text).trim().match(/^\/help(?:@\w+)?$/i)) {
-    await sendTelegramMessage("Create a draft PR request with:\n/pr Title | Description\n\nAn authorized approver must approve it before Manwall creates the PR.");
-    return { handled: true, command: "help" };
+  const userId = String(message?.from?.id ?? "");
+  if (!message?.text || !authorizedTelegramUser(chatId, userId)) return { handled: false };
+  const text = String(message.text);
+  try {
+    const command = await handleTelegramCommand(text, chatId, userId);
+    if (command) return command;
+  } catch (reason) {
+    const error = reason instanceof Error ? reason.message : "Telegram command failed.";
+    await sendTelegramChatMessage(chatId, `Manwall command failed: ${error}`);
+    return { handled: true, command: "error", error };
   }
-  if (String(message.text).trim().match(/^\/pr(?:@\w+)?(?:\s.*)?$/is) && !parseTelegramPrCommand(String(message.text), String(message.from?.id ?? ""), String(message.from?.username ?? ""))) {
-    await sendTelegramMessage("PR request format:\n/pr Title | Description\n\nExample:\n/pr Document wallet scanning | Explain how the wallet scan workflow works.");
+  if (text.trim().match(/^\/pr(?:@\w+)?(?:\s.*)?$/is) && !parseTelegramPrCommand(text, userId, String(message.from?.username ?? ""))) {
+    await sendTelegramChatMessage(chatId, "PR request format:\n/pr Title | Description\n\nExample:\n/pr Document wallet scanning | Explain how the wallet scan workflow works.");
     return { handled: true, command: "pr-help" };
   }
-  const payload = parseTelegramPrCommand(String(message.text), String(message.from?.id ?? ""), String(message.from?.username ?? ""));
+  const payload = parseTelegramPrCommand(text, userId, String(message.from?.username ?? ""));
   if (!payload) return { handled: false };
-  const approval = await createTelegramApproval("github.remediation-pr", payload.repository, payload, `telegram:${String(message.from?.id ?? "")}`);
-  await sendTelegramMessage(`PR request received. Approval ID: ${approval.id}`);
+  const approval = await createTelegramApproval("github.remediation-pr", payload.repository, payload, `telegram:${userId}`);
+  await sendTelegramChatMessage(chatId, `PR request received. Approval ID: ${approval.id}`);
   return { handled: true, command: "pr", approval };
 }

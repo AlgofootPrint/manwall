@@ -210,4 +210,55 @@ describe("production approval foundations", () => {
     });
     expect(result).toEqual({ handled: true, command: "pr-help" });
   });
+
+  it("runs contract analysis from an authorized Telegram chat", async () => {
+    delete process.env.DATABASE_URL;
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+    process.env.TELEGRAM_CHAT_ID = "-100123";
+    const messages: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      messages.push(String(JSON.parse(String(init?.body)).text ?? ""));
+      return Response.json({ ok: true, result: { message_id: 9 } });
+    };
+    const result = await handleTelegramUpdate({
+      message: {
+        text: "/analyze pragma solidity ^0.8.20; contract Example { function value() external pure returns (uint256) { return 1; } }",
+        chat: { id: "-100123" },
+        from: { id: "7", username: "developer" }
+      }
+    });
+    expect(result).toEqual({ handled: true, command: "analyze" });
+    expect(messages.some((message) => message.includes("Contract analysis: TelegramSubmission.sol"))).toBe(true);
+  });
+
+  it("queues monitored repository scans and reports their status from Telegram", async () => {
+    delete process.env.DATABASE_URL;
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+    process.env.TELEGRAM_CHAT_ID = "-100123";
+    process.env.MANTLE_MONITORED_REPOSITORIES = "merchant-moe/moe-core";
+    globalThis.fetch = async () => Response.json({ ok: true, result: { message_id: 10 } });
+    const scan = await handleTelegramUpdate({
+      message: { text: "/scan https://github.com/merchant-moe/moe-core", chat: { id: "-100123" }, from: { id: "7" } }
+    }) as any;
+    expect(scan.command).toBe("scan");
+    expect(scan.job.status).toBe("queued");
+    const status = await handleTelegramUpdate({
+      message: { text: `/status ${scan.job.id}`, chat: { id: "-100123" }, from: { id: "7" } }
+    }) as any;
+    expect(status.command).toBe("status");
+    expect(status.job.id).toBe(scan.job.id);
+  });
+
+  it("limits Telegram AI review to authorized approvers", async () => {
+    delete process.env.DATABASE_URL;
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+    process.env.TELEGRAM_CHAT_ID = "-100123";
+    process.env.TELEGRAM_APPROVER_USER_IDS = "42";
+    globalThis.fetch = async () => Response.json({ ok: true, result: { message_id: 11 } });
+    const result = await handleTelegramUpdate({
+      message: { text: "/ai JOB-UNKNOWN", chat: { id: "-100123" }, from: { id: "7" } }
+    }) as any;
+    expect(result.command).toBe("error");
+    expect(result.error).toContain("authorized Telegram approvers");
+  });
 });

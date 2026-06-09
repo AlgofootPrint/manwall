@@ -39,7 +39,11 @@ export async function sendTelegram(event: string, message: string) {
 }
 
 export async function sendTelegramMessage(message: string) {
-  const result = await telegramRequest("sendMessage", { chat_id: process.env.TELEGRAM_CHAT_ID, text: message });
+  return sendTelegramChatMessage(String(process.env.TELEGRAM_CHAT_ID), message);
+}
+
+export async function sendTelegramChatMessage(chatId: string, message: string) {
+  const result = await telegramRequest("sendMessage", { chat_id: chatId, text: message.slice(0, 4096) });
   return String(result.result?.message_id ?? "");
 }
 
@@ -79,6 +83,17 @@ export async function updateTelegramApprovalMessage(messageId: string, text: str
 }
 
 export async function configureTelegramWebhook(url: string) {
+  await telegramRequest("setMyCommands", {
+    commands: [
+      { command: "help", description: "Show Manwall bot commands" },
+      { command: "wallet", description: "Scan a Mantle wallet address" },
+      { command: "scan", description: "Queue a monitored repository scan" },
+      { command: "status", description: "Check a repository scan job" },
+      { command: "ai", description: "Run approver-only AI review" },
+      { command: "analyze", description: "Analyze pasted Solidity source" },
+      { command: "pr", description: "Request a draft documentation PR" }
+    ]
+  });
   return telegramRequest("setWebhook", {
     url,
     secret_token: process.env.TELEGRAM_WEBHOOK_SECRET,
