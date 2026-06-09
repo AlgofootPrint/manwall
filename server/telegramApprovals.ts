@@ -261,6 +261,24 @@ function asCommand(mode: TelegramInputMode, input: string) {
   return `/${command} ${input}`;
 }
 
+function telegramGroupMessageLink(messageId: string) {
+  const configured = process.env.TELEGRAM_GROUP_ALERT_URL?.trim();
+  if (configured) return `${configured.replace(/\/$/, "")}/${messageId}`;
+  const privateGroupId = String(process.env.TELEGRAM_CHAT_ID ?? "").match(/^-100(\d+)$/)?.[1];
+  return privateGroupId ? `https://t.me/c/${privateGroupId}/${messageId}` : "";
+}
+
+async function requestRepositoryScanApproval(repository: string, userId: string) {
+  const messageId = await sendTelegramChatMessage(String(process.env.TELEGRAM_CHAT_ID), [
+    "Repository scan approval needed",
+    `Repository: ${repository}`,
+    `Requested by Telegram user: ${userId}`,
+    "",
+    "An authorized approver can tap Scan Repository and paste this URL to approve and queue the isolated scan."
+  ].join("\n"), telegramMenu);
+  return telegramGroupMessageLink(messageId);
+}
+
 function commandArgument(text: string, command: string) {
   return text.trim().match(new RegExp(`^/${command}(?:@\\w+)?(?:\\s+([\\s\\S]+))?$`, "i"))?.[1]?.trim() ?? "";
 }
@@ -334,7 +352,11 @@ async function handleTelegramCommand(text: string, chatId: string, userId: strin
   if (repository) {
     const job = createRepositoryJob(repository);
     if (!allowedApprover(userId) && !monitoredRepositories().includes(normalizeRepositoryName(job.repository).toLowerCase())) {
-      throw new Error("This repository is not monitored. Ask an authorized Telegram approver to submit the public repository scan.");
+      const alertLink = await requestRepositoryScanApproval(job.repository, userId);
+      throw new Error([
+        "This repository is not monitored, so an authorized Telegram approver must submit it.",
+        alertLink ? `Open the approval alert: ${alertLink}` : "An approval alert was posted in the configured Manwall group."
+      ].join("\n"));
     }
     if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
       throw new Error("Repository hourly scan quota reached.");

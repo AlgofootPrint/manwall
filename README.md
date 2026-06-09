@@ -99,6 +99,8 @@ Repository scans retain the production hourly quota and execute in the isolated
 VPS worker. Group users can scan monitored repositories; users listed in
 `TELEGRAM_APPROVER_USER_IDS` can scan any valid public GitHub repository. AI
 review remains restricted to `TELEGRAM_APPROVER_USER_IDS`.
+When a regular user requests an unmonitored repository, Manwall posts an
+approval-needed group alert and returns a direct link to that alert.
 Telegram commands cannot edit application, server, or contract code.
 
 Production repository submissions require an authenticated GitHub OAuth session

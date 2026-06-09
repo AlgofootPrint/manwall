@@ -271,7 +271,11 @@ describe("production approval foundations", () => {
     process.env.TELEGRAM_CHAT_ID = "-100123";
     process.env.TELEGRAM_APPROVER_USER_IDS = "42";
     process.env.MANTLE_MONITORED_REPOSITORIES = "merchant-moe/moe-core";
-    globalThis.fetch = async () => Response.json({ ok: true, result: { message_id: 15 } });
+    const messages: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      messages.push(String(JSON.parse(String(init?.body)).text ?? ""));
+      return Response.json({ ok: true, result: { message_id: 15 } });
+    };
 
     const result = await handleTelegramUpdate({
       message: { text: "/scan https://github.com/example/public-contracts", chat: { id: "-100123" }, from: { id: "7" } }
@@ -279,6 +283,9 @@ describe("production approval foundations", () => {
 
     expect(result.command).toBe("error");
     expect(result.error).toContain("authorized Telegram approver");
+    expect(result.error).toContain("https://t.me/c/123/15");
+    expect(messages.some((message) => message.includes("Repository scan approval needed"))).toBe(true);
+    expect(messages.some((message) => message.includes("Open the approval alert: https://t.me/c/123/15"))).toBe(true);
   });
 
   it("limits Telegram AI review to authorized approvers", async () => {
