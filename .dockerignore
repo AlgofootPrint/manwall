@@ -5,3 +5,8 @@ data
 .env
 *.log
 *.tsbuildinfo
+.manwall_deploy_key
+.manwall_deploy_key.pub
+manwall-deploy.tar.gz
+*.pem
+*.key

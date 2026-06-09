@@ -8,4 +8,10 @@ tests/*.js
 tests/*.d.ts
 data/reports
 data/jobs
+data/ai-audit
 data/workspaces
+.manwall_deploy_key
+.manwall_deploy_key.pub
+manwall-deploy.tar.gz
+*.pem
+*.key

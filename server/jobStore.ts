@@ -9,13 +9,33 @@ export interface ScanJob {
   repository: string;
   createdAt: string;
   updatedAt: string;
+  attempts?: number;
+  maxAttempts?: number;
   error?: string;
   result?: {
     commit: string;
     filesScanned: number;
     findings: number;
+    summary?: {
+      securityFindings: number;
+      gasOptimizations: number;
+      compilationFailures: number;
+      toolFailures: number;
+    };
     reports: unknown[];
+    tools?: {
+      compilation?: ToolResult;
+      slither: ToolResult;
+      foundry: ToolResult;
+    };
   };
+}
+
+export interface ToolResult {
+  status: "passed" | "failed" | "skipped";
+  findings: number;
+  summary: string;
+  output: string;
 }
 
 const jobDir = path.resolve("data", "jobs");

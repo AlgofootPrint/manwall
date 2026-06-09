@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { saveJob, type ScanJob } from "./jobStore.js";
 import { runIsolatedRepositoryScan } from "./isolatedRunner.js";
+import { sendTelegram } from "./notifications.js";
+import { writeOperationAudit } from "./infrastructure.js";
 
 export function validateRepository(repository: string) {
   const url = new URL(repository);
@@ -22,11 +24,19 @@ export async function runRepositoryScan(job: ScanJob) {
     job.result = await runIsolatedRepositoryScan(job);
     job.status = "completed";
   } catch (reason) {
-    job.status = "failed";
     job.error = reason instanceof Error ? reason.message : "Repository scan failed";
+    job.status = (job.attempts ?? 0) < (job.maxAttempts ?? 3) ? "queued" : "failed";
   } finally {
     job.updatedAt = new Date().toISOString();
     await saveJob(job);
+    await writeOperationAudit("worker", "repository.scan", job.id, job.status, {
+      repository: job.repository,
+      attempts: job.attempts ?? 0,
+      error: job.error
+    });
+    if (job.status === "completed" || job.status === "failed") {
+      await sendTelegram(`scan.${job.status}`, `${job.id} ${job.status}: ${job.repository}`).catch(() => {});
+    }
   }
 }
 
@@ -38,6 +48,7 @@ export function createRepositoryJob(repository: string): ScanJob {
     status: "queued",
     repository: validateRepository(repository),
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    maxAttempts: Number(process.env.WORKER_JOB_MAX_ATTEMPTS ?? 3)
   };
 }

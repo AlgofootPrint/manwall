@@ -1,7 +1,8 @@
 FROM ghcr.io/foundry-rs/foundry@sha256:043752653d5be351c71709091b3db97c4421c907eb40ea294195e7f532aadf46 AS foundry
 FROM ethereum/solc@sha256:b116bf835554d40c501feab0b2c943a8c5eec003b804bcc5b326b85c93da00c2 AS solc
+FROM ethereum/solc@sha256:d9fdd9e4c7a14c0893f33bd9f9dd286db31df7128ac6b33b64c2858085d363e4 AS solc_0820
 
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git python3 python3-venv \
@@ -11,6 +12,7 @@ COPY --from=foundry /usr/local/bin/forge /usr/local/bin/forge
 COPY --from=foundry /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=foundry /usr/local/bin/anvil /usr/local/bin/anvil
 COPY --from=solc /usr/bin/solc /usr/local/bin/solc
+COPY --from=solc_0820 /usr/bin/solc /opt/solc/0.8.20/solc
 
 RUN python3 -m venv /opt/slither \
   && /opt/slither/bin/pip install --no-cache-dir slither-analyzer==0.11.5 \

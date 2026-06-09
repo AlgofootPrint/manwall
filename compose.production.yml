@@ -35,6 +35,15 @@ services:
       SCAN_RUNNER_IMAGE: ${SCAN_RUNNER_IMAGE:-manwall-scan-runner:local}
       SCAN_RUNNER_TIMEOUT_MS: ${SCAN_RUNNER_TIMEOUT_MS:-180000}
       WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-2000}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      WORKER_JOB_MAX_ATTEMPTS: ${WORKER_JOB_MAX_ATTEMPTS:-3}
+      CLONE_NETWORK: ${CLONE_NETWORK:-bridge}
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-manwall-evidence}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: "true"
     depends_on:
       postgres:
         condition: service_healthy

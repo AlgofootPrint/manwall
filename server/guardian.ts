@@ -5,6 +5,7 @@ import ganache from "ganache";
 import { BrowserProvider, ContractFactory, formatEther, keccak256, toUtf8Bytes } from "ethers";
 import { compileContracts, type Artifact } from "./compile.js";
 import type { AgentResult, ScanReport } from "./types.js";
+import { estimateMantleFees } from "./mantleGas.js";
 
 const identityURI = "manwall://mantle/autonomous-security-engineer/v1";
 
@@ -15,9 +16,16 @@ function result(
   started: number,
   summary: string,
   evidence: string[],
-  status: AgentResult["status"] = "passed"
+  status: AgentResult["status"] = "passed",
+  artifact?: AgentResult["artifact"]
 ): AgentResult {
-  return { id, name, role, status, summary, evidence, durationMs: Date.now() - started };
+  return { id, name, role, status, summary, evidence, durationMs: Date.now() - started, artifact };
+}
+
+const hash = (value: string) => keccak256(toUtf8Bytes(value));
+function artifact(kind: NonNullable<AgentResult["artifact"]>["kind"], value: unknown): AgentResult["artifact"] {
+  const content = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return { kind, content, hash: hash(content) };
 }
 
 async function deploy(artifact: Artifact, signer: Awaited<ReturnType<BrowserProvider["getSigner"]>>, args: unknown[] = []) {
@@ -35,6 +43,14 @@ export async function runGuardianScan(): Promise<ScanReport> {
   let started = Date.now();
   const vulnerableSource = fs.readFileSync(path.resolve("contracts/VulnerableVault.sol"), "utf8");
   const securedSource = fs.readFileSync(path.resolve("contracts/SecuredVault.sol"), "utf8");
+  const architectureManifest = {
+    source: "contracts/VulnerableVault.sol",
+    sourceHash: hash(vulnerableSource),
+    assets: ["native MNT held by vault"],
+    entrypoints: ["deposit()", "withdraw()"],
+    trustBoundaries: ["withdraw() transfers control to msg.sender"],
+    invariant: "credited balance must not be withdrawn more than once"
+  };
   agents.push(result(
     "architecture",
     "Architecture Agent",
@@ -45,11 +61,21 @@ export async function runGuardianScan(): Promise<ScanReport> {
       "Asset boundary: native MNT/ETH held by vault",
       "Trust boundary: msg.sender receives control during withdraw()",
       "State invariant: total credited balances must cover withdrawals"
-    ]
+    ],
+    "passed",
+    artifact("architecture-manifest", architectureManifest)
   ));
 
   started = Date.now();
   const interactionBeforeEffect = vulnerableSource.indexOf("msg.sender.call") < vulnerableSource.indexOf("balances[msg.sender] = 0");
+  const attackPlan = {
+    vulnerability: "reentrancy / interaction before effect",
+    entrypoint: "withdraw()",
+    interactionBeforeEffect,
+    preconditions: ["attacker deposits 1 MNT", "vault contains victim funds"],
+    successCondition: "attacker withdraws more than its deposit",
+    attackerSourceHash: hash(fs.readFileSync(path.resolve("contracts/ReentrancyAttacker.sol"), "utf8"))
+  };
   agents.push(result(
     "attack",
     "Attack Agent",
@@ -60,7 +86,9 @@ export async function runGuardianScan(): Promise<ScanReport> {
       `Interaction-before-effect detected: ${interactionBeforeEffect}`,
       "Attacker can recursively withdraw before its balance is cleared",
       "CWE-841: Improper Enforcement of Behavioral Workflow"
-    ]
+    ],
+    "passed",
+    artifact("attack-plan", attackPlan)
   ));
 
   const chain = ganache.provider({
@@ -98,6 +126,12 @@ export async function runGuardianScan(): Promise<ScanReport> {
 
   started = Date.now();
   const patchHasEffectFirst = securedSource.indexOf("balances[msg.sender] = 0") < securedSource.indexOf("msg.sender.call");
+  const patchArtifact = {
+    strategy: "checks-effects-interactions plus reentrancy lock",
+    originalSourceHash: hash(vulnerableSource),
+    patchedSourceHash: hash(securedSource),
+    artifact: "contracts/SecuredVault.sol"
+  };
   agents.push(result(
     "patch",
     "Patch Agent",
@@ -108,7 +142,9 @@ export async function runGuardianScan(): Promise<ScanReport> {
       `Effect-before-interaction verified: ${patchHasEffectFirst}`,
       "Added nonReentrant modifier",
       "Patch artifact: contracts/SecuredVault.sol"
-    ]
+    ],
+    "passed",
+    artifact("patch-diff", patchArtifact)
   ));
 
   const secured = await deploy(artifacts.SecuredVault, deployer);
@@ -144,28 +180,36 @@ export async function runGuardianScan(): Promise<ScanReport> {
   const securedWithdrawReceipt = await (await secured.connect(cleanUser).withdraw()).wait();
   const gasSecured = BigInt(securedWithdrawReceipt?.gasUsed ?? 0);
   const delta = gasVulnerable === 0n ? 0 : Number((gasSecured - gasVulnerable) * 10000n / gasVulnerable) / 100;
+  const mantleFeeEstimate = await estimateMantleFees(gasVulnerable, gasSecured);
   agents.push(result(
     "gas",
     "Gas Agent",
     "Benchmarks remediation overhead against execution evidence.",
     started,
-    `Secured withdrawal uses ${gasSecured.toString()} gas on the local Mantle-compatible EVM.`,
+    `Secured withdrawal uses ${gasSecured.toString()} gas on the local Mantle-compatible EVM, with reviewable optimization guidance kept separate from security proof.`,
     [
       `Exploit transaction gas: ${gasVulnerable.toString()}`,
       `Secured normal withdrawal gas: ${gasSecured.toString()}`,
-      `Measured delta: ${delta.toFixed(2)}%`
+      `Measured delta: ${delta.toFixed(2)}%`,
+      mantleFeeEstimate.status === "live"
+        ? `Live Mantle Sepolia estimate at block ${mantleFeeEstimate.blockNumber}: vulnerable ${mantleFeeEstimate.vulnerableCostMnt} MNT, secured ${mantleFeeEstimate.securedCostMnt} MNT`
+        : `Live Mantle Sepolia fee estimate unavailable: ${mantleFeeEstimate.detail}`,
+      "Mantle gas advice: keep the reentrancy lock despite overhead; optimize surrounding storage reads only after preserving exploit replay failure"
     ]
   ));
 
-  const evidencePayload = JSON.stringify({
-    target: vulnerableAddress,
-    vulnerability: "SWC-107 Reentrancy",
-    exploit: attackReceipt?.hash,
-    stolen: stolen.toString(),
-    replayBlocked
-  });
-  const evidenceHash = keccak256(toUtf8Bytes(evidencePayload));
   const scanId = `MG-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+  const proofManifest = {
+    version: "manwall-controlled-proof-v1",
+    scanId,
+    chainId: 5003,
+    architecture: architectureManifest,
+    attackPlan,
+    patch: patchArtifact,
+    execution: { target: vulnerableAddress, exploit: attackReceipt?.hash, stolenWei: stolen.toString(), replayBlocked },
+    gas: { vulnerable: gasVulnerable.toString(), secured: gasSecured.toString(), deltaPercent: `${delta.toFixed(2)}%`, mantleFeeEstimate }
+  };
+  const evidenceHash = hash(JSON.stringify(proofManifest));
 
   started = Date.now();
   const registry = await deploy(artifacts.GuardianAttestationRegistry, deployer, [identityURI]);
@@ -187,7 +231,9 @@ export async function runGuardianScan(): Promise<ScanReport> {
       `Evidence hash: ${evidenceHash}`,
       `Attestation transaction: ${publishReceipt?.hash}`,
       `Agent identity: ${identityURI}`
-    ]
+    ],
+    "passed",
+    artifact("proof-manifest", proofManifest)
   ));
 
   return {
@@ -206,13 +252,20 @@ export async function runGuardianScan(): Promise<ScanReport> {
     gas: {
       vulnerableWithdraw: gasVulnerable.toString(),
       securedWithdraw: gasSecured.toString(),
-      deltaPercent: `${delta.toFixed(2)}%`
+      deltaPercent: `${delta.toFixed(2)}%`,
+      mantleFeeEstimate,
+      mantleAdvice: [
+        "Do not remove the reentrancy lock to save gas; security invariant wins over micro-optimization.",
+        "Prefer custom errors, calldata parameters, cached loop lengths, and immutable configuration for Mantle-facing production contracts.",
+        "Validate each optimization with Foundry gas snapshots before publication or remediation PR creation."
+      ]
     },
     attestation: {
       evidenceHash,
       identityURI,
       registryMode: "local-proof",
-      transactionHash: publishReceipt?.hash
+      transactionHash: publishReceipt?.hash,
+      manifest: proofManifest
     }
   };
 }

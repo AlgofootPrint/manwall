@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import type { ScanJob } from "./jobStore.js";
 
 const image = process.env.SCAN_RUNNER_IMAGE ?? "manwall-scan-runner:local";
-const timeoutMs = Number(process.env.SCAN_RUNNER_TIMEOUT_MS ?? 180_000);
+const timeoutMs = Number(process.env.SCAN_RUNNER_TIMEOUT_MS ?? 600_000);
+const cloneNetwork = process.env.CLONE_NETWORK ?? "bridge";
+const memoryLimit = process.env.SCAN_RUNNER_MEMORY ?? "2g";
+const tmpfsLimit = process.env.SCAN_RUNNER_TMPFS_SIZE ?? "512m";
 
 function docker(args: string[], containerName: string, timeout = timeoutMs): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -31,11 +34,11 @@ const restrictions = [
   "--cap-drop", "ALL",
   "--security-opt", "no-new-privileges",
   "--cpus", "1",
-  "--memory", "1g",
-  "--memory-swap", "1g",
+  "--memory", memoryLimit,
+  "--memory-swap", memoryLimit,
   "--pids-limit", "128",
   "--env", "HOME=/tmp",
-  "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m"
+  "--tmpfs", `/tmp:rw,noexec,nosuid,size=${tmpfsLimit}`
 ];
 
 export async function runIsolatedRepositoryScan(job: ScanJob) {
@@ -48,7 +51,7 @@ export async function runIsolatedRepositoryScan(job: ScanJob) {
     await docker([
       "run", ...restrictions,
       "--name", cloneContainer,
-      "--network", "bridge",
+      "--network", cloneNetwork,
       "--mount", `type=volume,source=${volume},target=/workspace`,
       image, "clone", job.repository
     ], cloneContainer);

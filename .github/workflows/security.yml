@@ -1,0 +1,71 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npx vitest run
+      - run: npm audit --audit-level=high --omit=dev
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.api
+          load: true
+          tags: manwall-api:ci
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.runner
+          load: true
+          tags: manwall-runner:ci
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: manwall-api:ci
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+      - uses: anchore/sbom-action@v0
+        with:
+          image: manwall-api:ci
+          artifact-name: manwall-api.spdx.json
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: manwall-runner:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2

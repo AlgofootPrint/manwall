@@ -10,7 +10,10 @@
     "start:worker": "tsx server/worker.ts",
     "test": "tsx server/selftest.ts",
     "demo": "tsx server/demo.ts",
-    "compile:contracts": "tsx server/compile.ts"
+    "compile:contracts": "tsx server/compile.ts",
+    "migrate": "tsx server/migrate.ts",
+    "smoke": "node scripts/smoke.mjs",
+    "verify:attestation-policy": "node scripts/verify-attestation-policy.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1063.0",
@@ -18,11 +21,13 @@
     "dotenv": "^17.4.2",
     "ethers": "^6.15.0",
     "express": "^5.1.0",
+    "ganache": "^7.9.2",
     "lucide-react": "^0.468.0",
     "pg": "^8.21.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "solc": "^0.8.30",
+    "three": "^0.184.0",
     "tsx": "^4.19.2",
     "zod": "^3.24.2"
   },
@@ -33,9 +38,9 @@
     "@types/pg": "^8.20.0",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
+    "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
-    "ganache": "^7.9.2",
     "typescript": "~5.7.2",
     "vite": "^6.1.0",
     "vitest": "^2.1.8"

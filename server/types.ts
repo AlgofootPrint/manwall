@@ -8,6 +8,11 @@ export interface AgentResult {
   summary: string;
   evidence: string[];
   durationMs: number;
+  artifact?: {
+    kind: "architecture-manifest" | "attack-plan" | "patch-diff" | "proof-manifest";
+    content: string;
+    hash: string;
+  };
 }
 
 export interface ScanReport {
@@ -32,11 +37,14 @@ export interface ScanReport {
     vulnerableWithdraw: string;
     securedWithdraw: string;
     deltaPercent: string;
+    mantleAdvice?: string[];
+    mantleFeeEstimate?: import("./mantleGas.js").MantleFeeEstimate;
   };
   attestation: {
     evidenceHash: string;
     identityURI: string;
     registryMode: "local-proof" | "mantle-sepolia";
     transactionHash?: string;
+    manifest?: Record<string, unknown>;
   };
 }
