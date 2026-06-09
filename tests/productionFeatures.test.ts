@@ -261,4 +261,56 @@ describe("production approval foundations", () => {
     expect(result.command).toBe("error");
     expect(result.error).toContain("authorized Telegram approvers");
   });
+
+  it("shows a persistent button menu and guides contract analysis input", async () => {
+    delete process.env.DATABASE_URL;
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+    process.env.TELEGRAM_CHAT_ID = "-100123";
+    const requests: any[] = [];
+    globalThis.fetch = async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return Response.json({ ok: true, result: { message_id: 12 } });
+    };
+
+    const help = await handleTelegramUpdate({
+      message: { text: "/help", chat: { id: "-100123" }, from: { id: "7" } }
+    });
+    const prompt = await handleTelegramUpdate({
+      message: { text: "Analyze Contract", chat: { id: "-100123" }, from: { id: "7" } }
+    });
+    const analysis = await handleTelegramUpdate({
+      message: {
+        text: "pragma solidity ^0.8.20; contract ButtonExample { function value() external pure returns (uint256) { return 1; } }",
+        chat: { id: "-100123" },
+        from: { id: "7" }
+      }
+    });
+
+    expect(help).toEqual({ handled: true, command: "help" });
+    expect(prompt).toEqual({ handled: true, command: "analyze-prompt" });
+    expect(analysis).toEqual({ handled: true, command: "analyze" });
+    expect(requests[0].reply_markup.is_persistent).toBe(true);
+    expect(requests[0].reply_markup.keyboard.flat().map((item: any) => item.text)).toContain("Scan Wallet");
+  });
+
+  it("keeps guided button input scoped to the user who tapped it", async () => {
+    delete process.env.DATABASE_URL;
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+    process.env.TELEGRAM_CHAT_ID = "-100123";
+    globalThis.fetch = async () => Response.json({ ok: true, result: { message_id: 13 } });
+
+    await handleTelegramUpdate({
+      message: { text: "Check Scan Status", chat: { id: "-100123" }, from: { id: "7" } }
+    });
+    const otherUser = await handleTelegramUpdate({
+      message: { text: "JOB-NOT-MINE", chat: { id: "-100123" }, from: { id: "8" } }
+    });
+    const initiatingUser = await handleTelegramUpdate({
+      message: { text: "JOB-UNKNOWN", chat: { id: "-100123" }, from: { id: "7" } }
+    }) as any;
+
+    expect(otherUser).toEqual({ handled: false });
+    expect(initiatingUser.command).toBe("error");
+    expect(initiatingUser.error).toContain("not found");
+  });
 });

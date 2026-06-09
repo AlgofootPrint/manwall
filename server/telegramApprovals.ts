@@ -30,6 +30,18 @@ export interface TelegramApproval {
 
 const memory = new Map<string, TelegramApproval>();
 const memoryPayloads = new Map<string, unknown>();
+type TelegramInputMode = "wallet" | "scan" | "status" | "ai" | "analyze";
+const pendingInputs = new Map<string, { mode: TelegramInputMode; expiresAt: number }>();
+const telegramMenu = {
+  keyboard: [
+    [{ text: "Scan Wallet" }, { text: "Scan Repository" }],
+    [{ text: "Check Scan Status" }, { text: "AI Review" }],
+    [{ text: "Analyze Contract" }, { text: "Help" }]
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+  input_field_placeholder: "Choose a Manwall action"
+};
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -210,17 +222,44 @@ export function parseTelegramPrCommand(text: string, userId: string, username = 
 }
 
 const helpMessage = [
-  "Manwall bot commands",
+  "Choose an action using the buttons below.",
   "",
-  "Paste a wallet address or use /wallet <0x address>",
-  "/scan <GitHub repository URL>",
-  "/status <job-id>",
-  "/ai <completed job-id> (authorized approvers only)",
-  "/analyze <Solidity source>",
-  "/pr Title | Description",
+  "Scan Wallet: paste a 0x wallet address.",
+  "Scan Repository: paste a monitored GitHub repository URL.",
+  "Check Scan Status: paste a Manwall job ID.",
+  "AI Review: paste a completed job ID. Authorized approvers only.",
+  "Analyze Contract: paste Solidity source code.",
   "",
-  "Repository scans run in the isolated VPS worker. Contract analysis is heuristic source triage, not a confirmed exploit proof."
+  "Repository scans run in the isolated VPS worker. Contract analysis is heuristic source triage, not a confirmed exploit proof. Slash commands remain available as a fallback."
 ].join("\n");
+
+const buttonModes: Record<string, { mode: TelegramInputMode; prompt: string }> = {
+  "Scan Wallet": { mode: "wallet", prompt: "Paste the 0x wallet address you want Manwall to scan." },
+  "Scan Repository": { mode: "scan", prompt: "Paste a monitored public GitHub repository URL." },
+  "Check Scan Status": { mode: "status", prompt: "Paste the Manwall job ID, for example JOB-A454E472." },
+  "AI Review": { mode: "ai", prompt: "Paste the completed Manwall job ID to review with AI." },
+  "Analyze Contract": { mode: "analyze", prompt: "Paste the Solidity contract source code." }
+};
+
+function pendingInputKey(chatId: string, userId: string) {
+  return `${chatId}:${userId}`;
+}
+
+function setPendingInput(chatId: string, userId: string, mode: TelegramInputMode) {
+  pendingInputs.set(pendingInputKey(chatId, userId), { mode, expiresAt: Date.now() + 10 * 60_000 });
+}
+
+function consumePendingInput(chatId: string, userId: string) {
+  const key = pendingInputKey(chatId, userId);
+  const pending = pendingInputs.get(key);
+  pendingInputs.delete(key);
+  return pending && pending.expiresAt > Date.now() ? pending.mode : undefined;
+}
+
+function asCommand(mode: TelegramInputMode, input: string) {
+  const command = mode === "wallet" ? "wallet" : mode === "scan" ? "scan" : mode === "status" ? "status" : mode === "ai" ? "ai" : "analyze";
+  return `/${command} ${input}`;
+}
 
 function commandArgument(text: string, command: string) {
   return text.trim().match(new RegExp(`^/${command}(?:@\\w+)?(?:\\s+([\\s\\S]+))?$`, "i"))?.[1]?.trim() ?? "";
@@ -271,9 +310,16 @@ function analysisSummary(result: ReturnType<typeof analyzeSource>) {
 
 async function handleTelegramCommand(text: string, chatId: string, userId: string) {
   const reply = (message: string) => sendTelegramChatMessage(chatId, message);
-  if (/^\/(?:start|help)(?:@\w+)?$/i.test(text.trim())) {
-    await reply(helpMessage);
+  if (/^\/(?:start|help)(?:@\w+)?$/i.test(text.trim()) || text.trim() === "Help") {
+    await sendTelegramChatMessage(chatId, helpMessage, telegramMenu);
     return { handled: true, command: "help" };
+  }
+  const button = buttonModes[text.trim()];
+  if (button) {
+    if (button.mode === "ai" && !allowedApprover(userId)) throw new Error("AI review is limited to authorized Telegram approvers.");
+    setPendingInput(chatId, userId, button.mode);
+    await sendTelegramChatMessage(chatId, button.prompt, telegramMenu);
+    return { handled: true, command: `${button.mode}-prompt` };
   }
 
   const walletAddress = text.trim().match(/^0x[a-fA-F0-9]{40}$/)?.[0] ?? commandArgument(text, "wallet");
@@ -344,7 +390,12 @@ export async function handleTelegramUpdate(update: any) {
   const chatId = String(message?.chat?.id ?? "");
   const userId = String(message?.from?.id ?? "");
   if (!message?.text || !authorizedTelegramUser(chatId, userId)) return { handled: false };
-  const text = String(message.text);
+  let text = String(message.text);
+  const isButton = Boolean(buttonModes[text.trim()]) || text.trim() === "Help";
+  if (!isButton && !text.trim().startsWith("/")) {
+    const mode = consumePendingInput(chatId, userId);
+    if (mode) text = asCommand(mode, text);
+  }
   try {
     const command = await handleTelegramCommand(text, chatId, userId);
     if (command) return command;

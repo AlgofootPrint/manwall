@@ -85,7 +85,9 @@ The configured Telegram group can request a constrained draft documentation PR
 with `/pr Title | Description`. Manwall generates a unique `manwall/telegram-*`
 branch and a file under `docs/telegram/`, then requires an authorized Telegram
 approver to approve the exact payload before creating the draft PR. Telegram
-also exposes bounded Manwall workflows to the configured group:
+also exposes bounded Manwall workflows through a persistent Telegram button
+menu. Tapping a button prompts the user for the required wallet, repository,
+job ID, or Solidity source. Slash commands remain available as a fallback:
 
 - Paste an EVM address or use `/wallet <address>` to scan Mantle wallet posture.
 - Use `/scan <GitHub URL>` for monitored repositories and `/status <job-id>` for results.

@@ -42,8 +42,12 @@ export async function sendTelegramMessage(message: string) {
   return sendTelegramChatMessage(String(process.env.TELEGRAM_CHAT_ID), message);
 }
 
-export async function sendTelegramChatMessage(chatId: string, message: string) {
-  const result = await telegramRequest("sendMessage", { chat_id: chatId, text: message.slice(0, 4096) });
+export async function sendTelegramChatMessage(chatId: string, message: string, replyMarkup?: Record<string, unknown>) {
+  const result = await telegramRequest("sendMessage", {
+    chat_id: chatId,
+    text: message.slice(0, 4096),
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {})
+  });
   return String(result.result?.message_id ?? "");
 }
 
