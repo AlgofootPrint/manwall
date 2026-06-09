@@ -355,7 +355,9 @@ async function handleTelegramCommand(text: string, chatId: string, userId: strin
       const alertLink = await requestRepositoryScanApproval(job.repository, userId);
       throw new Error([
         "This repository is not monitored, so an authorized Telegram approver must submit it.",
-        alertLink ? `Open the approval alert: ${alertLink}` : "An approval alert was posted in the configured Manwall group."
+        alertLink
+          ? `Open the approval alert: ${alertLink}`
+          : "An approval alert was posted in this Manwall group. Direct alert links require the group to be upgraded to a Telegram supergroup."
       ].join("\n"));
     }
     if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {

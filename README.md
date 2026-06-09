@@ -100,7 +100,9 @@ VPS worker. Group users can scan monitored repositories; users listed in
 `TELEGRAM_APPROVER_USER_IDS` can scan any valid public GitHub repository. AI
 review remains restricted to `TELEGRAM_APPROVER_USER_IDS`.
 When a regular user requests an unmonitored repository, Manwall posts an
-approval-needed group alert and returns a direct link to that alert.
+approval-needed group alert and returns a direct link when the configured chat
+is a Telegram supergroup or `TELEGRAM_GROUP_ALERT_URL` is configured. Legacy
+basic groups do not support direct message links.
 Telegram commands cannot edit application, server, or contract code.
 
 Production repository submissions require an authenticated GitHub OAuth session
