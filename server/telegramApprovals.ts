@@ -333,8 +333,8 @@ async function handleTelegramCommand(text: string, chatId: string, userId: strin
   const repository = commandArgument(text, "scan");
   if (repository) {
     const job = createRepositoryJob(repository);
-    if (!monitoredRepositories().includes(normalizeRepositoryName(job.repository).toLowerCase())) {
-      throw new Error("Telegram scans are limited to Manwall's monitored repositories.");
+    if (!allowedApprover(userId) && !monitoredRepositories().includes(normalizeRepositoryName(job.repository).toLowerCase())) {
+      throw new Error("This repository is not monitored. Ask an authorized Telegram approver to submit the public repository scan.");
     }
     if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
       throw new Error("Repository hourly scan quota reached.");

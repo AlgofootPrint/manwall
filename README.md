@@ -96,7 +96,9 @@ job ID, or Solidity source. Slash commands remain available as a fallback:
 - Use `/help` to display the command reference.
 
 Repository scans retain the production hourly quota and execute in the isolated
-VPS worker. AI review remains restricted to `TELEGRAM_APPROVER_USER_IDS`.
+VPS worker. Group users can scan monitored repositories; users listed in
+`TELEGRAM_APPROVER_USER_IDS` can scan any valid public GitHub repository. AI
+review remains restricted to `TELEGRAM_APPROVER_USER_IDS`.
 Telegram commands cannot edit application, server, or contract code.
 
 Production repository submissions require an authenticated GitHub OAuth session

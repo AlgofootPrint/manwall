@@ -249,6 +249,38 @@ describe("production approval foundations", () => {
     expect(status.job.id).toBe(scan.job.id);
   });
 
+  it("allows Telegram approvers to scan any public GitHub repository", async () => {
+    delete process.env.DATABASE_URL;
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+    process.env.TELEGRAM_CHAT_ID = "-100123";
+    process.env.TELEGRAM_APPROVER_USER_IDS = "42";
+    process.env.MANTLE_MONITORED_REPOSITORIES = "merchant-moe/moe-core";
+    globalThis.fetch = async () => Response.json({ ok: true, result: { message_id: 14 } });
+
+    const result = await handleTelegramUpdate({
+      message: { text: "/scan https://github.com/example/public-contracts", chat: { id: "-100123" }, from: { id: "42" } }
+    }) as any;
+
+    expect(result.command).toBe("scan");
+    expect(result.job.repository).toBe("https://github.com/example/public-contracts.git");
+  });
+
+  it("keeps arbitrary public repository scans restricted for regular group users", async () => {
+    delete process.env.DATABASE_URL;
+    process.env.TELEGRAM_BOT_TOKEN = "test-bot";
+    process.env.TELEGRAM_CHAT_ID = "-100123";
+    process.env.TELEGRAM_APPROVER_USER_IDS = "42";
+    process.env.MANTLE_MONITORED_REPOSITORIES = "merchant-moe/moe-core";
+    globalThis.fetch = async () => Response.json({ ok: true, result: { message_id: 15 } });
+
+    const result = await handleTelegramUpdate({
+      message: { text: "/scan https://github.com/example/public-contracts", chat: { id: "-100123" }, from: { id: "7" } }
+    }) as any;
+
+    expect(result.command).toBe("error");
+    expect(result.error).toContain("authorized Telegram approver");
+  });
+
   it("limits Telegram AI review to authorized approvers", async () => {
     delete process.env.DATABASE_URL;
     process.env.TELEGRAM_BOT_TOKEN = "test-bot";
