@@ -8,5 +8,11 @@
       "source": "/:path*",
       "destination": "/index.html"
     }
-  ]
+  ],
+  "experimentalServices": {
+    "web": {
+      "routePrefix": "/",
+      "framework": "vite"
+    }
+  }
 }
