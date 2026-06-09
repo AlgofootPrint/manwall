@@ -1,0 +1,25 @@
+.env
+.env.*
+.git
+.github
+.vercel
+.manwall_deploy_key
+.manwall_deploy_key.pub
+*.key
+*.pem
+*.log
+1. GitHub.txt
+contracts
+data
+docs
+node_modules
+scripts
+server
+tests
+compose.infrastructure.yml
+compose.production.yml
+Dockerfile.api
+Dockerfile.runner
+Dockerfile.worker
+manwall-deploy.tar.gz
+railway.toml
