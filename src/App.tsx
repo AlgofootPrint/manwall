@@ -898,6 +898,14 @@ export default function App() {
       <footer>
         <a className="brand-lockup" href="#top"><i className="brand-logo" /><span className="wordmark">man<b>wall</b>.</span></a>
         <p>Evidence-first security for Mantle.</p>
+        <nav className="footer-links" aria-label="Manwall Telegram links">
+          <a href="https://t.me/ManwallguardBot" target="_blank" rel="noreferrer">
+            Try Manwall on Telegram <ExternalLink size={11} />
+          </a>
+          <a href="https://t.me/manwall" target="_blank" rel="noreferrer">
+            Alerts &amp; approvals <ExternalLink size={11} />
+          </a>
+        </nav>
         <span><GitPullRequest size={13} /> ERC-8004 aligned</span>
       </footer>
     </div>
