@@ -56,7 +56,18 @@ export async function repositoryAuthorized(actor: Actor, repository: string) {
   const normalized = normalizeRepositoryName(repository);
   if (monitoredRepositories().includes(normalized.toLowerCase())) return true;
   const client = databaseClient();
-  if (!client || !actor.authenticated) return false;
+  if (!client) return false;
+  const approved = await client.query(
+    `SELECT 1
+     FROM telegram_approvals
+     WHERE action = 'repository.scan'
+       AND status IN ('approved', 'consumed')
+       AND lower(regexp_replace(regexp_replace(coalesce(payload->>'repository', ''), '^https://github\\.com/', '', 'i'), '\\.git$', '', 'i')) = lower($1)
+     LIMIT 1`,
+    [normalized]
+  );
+  if (approved.rows[0]) return true;
+  if (!actor.authenticated) return false;
   const result = await client.query(
     `SELECT 1 FROM authorized_repositories ar
      JOIN team_members tm ON tm.team_id = ar.team_id
