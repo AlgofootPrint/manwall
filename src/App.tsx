@@ -391,9 +391,12 @@ export default function App() {
   async function runAi(workflow: "review" | "patch", key: string, payload: Record<string, unknown>) {
     const target = payload.repository ? "#repository" : "#workbench";
     if (workflow === "review") {
-      sessionStorage.setItem(pendingAiKey, JSON.stringify({ workflow, key, payload }));
-      setAiStatus((current) => ({ ...current, [key]: "Requesting fresh GitHub authorization..." }));
-      beginAiLogin(target);
+      const reviewed = await executeAi(workflow, key, payload);
+      if (!reviewed) {
+        sessionStorage.setItem(pendingAiKey, JSON.stringify({ workflow, key, payload }));
+        setAiStatus((current) => ({ ...current, [key]: "Requesting fresh GitHub authorization..." }));
+        beginAiLogin(target);
+      }
       return;
     }
     if (!actor.authenticated) {
@@ -416,18 +419,22 @@ export default function App() {
       });
       if (response.status === 401) {
         setActor({ id: "anonymous", login: "anonymous", authenticated: false });
-        throw new Error("GitHub authorization completed, but the AI request did not receive a valid session.");
+        if (workflow !== "review") throw new Error("GitHub authorization completed, but the AI request did not receive a valid session.");
+        setAiStatus((current) => ({ ...current, [key]: "GitHub authorization required." }));
+        return false;
       }
       const body = await response.json().catch(() => ({})) as AiResult & { error?: string };
       if (!response.ok) throw new Error(body.error ?? `AI request failed with HTTP ${response.status}.`);
       setAiResults((current) => ({ ...current, [key]: body }));
       setAiStatus((current) => ({ ...current, [key]: `${workflow === "review" ? "AI review" : "Patch draft"} completed.` }));
       if (workflow === "review") sessionStorage.removeItem(pendingAiKey);
+      return true;
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "AI request failed.";
       setError(message);
       setAiStatus((current) => ({ ...current, [key]: `AI request failed: ${message}` }));
       if (workflow === "review") sessionStorage.removeItem(pendingAiKey);
+      return true;
     } finally {
       finishRequest();
     }

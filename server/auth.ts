@@ -79,10 +79,12 @@ export async function repositoryAuthorized(actor: Actor, repository: string) {
 
 export function githubLogin() {
   if (!process.env.GITHUB_OAUTH_CLIENT_ID || !process.env.GITHUB_OAUTH_CALLBACK_URL) throw new Error("GitHub OAuth is not configured.");
+  const clientId = process.env.GITHUB_OAUTH_CLIENT_ID.trim();
+  const callbackUrl = process.env.GITHUB_OAUTH_CALLBACK_URL.trim();
   const state = crypto.randomBytes(24).toString("base64url");
   return {
     state,
-    url: `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(process.env.GITHUB_OAUTH_CLIENT_ID)}&redirect_uri=${encodeURIComponent(process.env.GITHUB_OAUTH_CALLBACK_URL)}&scope=read:user&state=${state}`
+    url: `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=read:user&state=${state}`
   };
 }
 
@@ -105,10 +107,18 @@ export function verifyGithubOAuthState(request: Request, state: string) {
 
 export async function completeGithubLogin(code: string) {
   if (!process.env.GITHUB_OAUTH_CLIENT_ID || !process.env.GITHUB_OAUTH_CLIENT_SECRET) throw new Error("GitHub OAuth is not configured.");
+  const clientId = process.env.GITHUB_OAUTH_CLIENT_ID.trim();
+  const clientSecret = process.env.GITHUB_OAUTH_CLIENT_SECRET.trim();
+  const callbackUrl = process.env.GITHUB_OAUTH_CALLBACK_URL?.trim();
   const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ client_id: process.env.GITHUB_OAUTH_CLIENT_ID, client_secret: process.env.GITHUB_OAUTH_CLIENT_SECRET, code })
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: callbackUrl
+    })
   });
   const tokenBody = await tokenResponse.json() as { access_token?: string; error_description?: string };
   if (!tokenBody.access_token) throw new Error(tokenBody.error_description ?? "GitHub OAuth exchange failed.");
