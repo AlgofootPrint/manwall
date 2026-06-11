@@ -8,8 +8,8 @@ import { getReport, listReports, saveReport } from "./reportStore.js";
 import { analyzeSource } from "./sourceScanner.js";
 import type { ScanReport } from "./types.js";
 import { getCapabilities } from "./capabilities.js";
-import { createRepositoryJob, runRepositoryScan } from "./repositoryScanner.js";
-import { getJob, listJobs, saveJob } from "./jobStore.js";
+import { createRepositoryJob, queueRepositoryJob } from "./repositoryScanner.js";
+import { getJob, listJobs } from "./jobStore.js";
 import { configureTeamAuthorization, infrastructureStatus, listOperationAudits, recentRepositoryJobCount, writeOperationAudit } from "./infrastructure.js";
 import { acceptGitHubWebhook, createRemediationPullRequest, getGitHubRepositoryAccess, verifyGitHubWebhookSignature } from "./github.js";
 import { getAiStatus, listAiAuditLogs, runAiWorkflow } from "./ai.js";
@@ -31,7 +31,6 @@ declare global {
 
 const app = express();
 const port = Number(process.env.PORT ?? 8787);
-const inlineRepositoryJobs = process.env.INLINE_REPOSITORY_JOBS ?? (process.env.NODE_ENV === "production" ? "false" : "true");
 const repositoryMonitorIntervalMs = Number(process.env.GITHUB_MONITOR_POLL_INTERVAL_MS ?? (process.env.NODE_ENV === "production" ? 300_000 : 0));
 let latest: ScanReport | null = null;
 let activeScan: Promise<ScanReport> | null = null;
@@ -263,8 +262,7 @@ app.post("/api/github/webhook", async (request, response) => {
     response.status(429).json({ error: "Repository hourly scan quota reached." });
     return;
   }
-  await saveJob(job);
-  if (inlineRepositoryJobs === "true") void runRepositoryScan(job);
+  await queueRepositoryJob(job);
   response.status(202).json({
     accepted: true,
     event,
@@ -509,24 +507,32 @@ app.post("/api/jobs/repository", async (request, response) => {
     const actor = await actorFromRequest(request);
     const repositories = parsed.data.repositories ?? [parsed.data.repository!];
     const jobs = [];
+    const approvals = [];
     for (const repository of repositories) {
       const job = createRepositoryJob(repository);
-      if (process.env.NODE_ENV === "production") {
-        if (!await repositoryAuthorized(actor, job.repository)) {
-          response.status(403).json({ error: "Authentication and repository authorization are required." });
-          return;
-        }
+      if (!await repositoryAuthorized(actor, job.repository)) {
+        const approval = await createTelegramApproval(
+          "repository.scan",
+          job.repository,
+          { repository: job.repository },
+          `web:${actor.login}`
+        );
+        approvals.push(approval);
+        continue;
       }
       const recent = await recentRepositoryJobCount(job.repository);
       if (recent >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
         response.status(429).json({ error: "Repository hourly scan quota reached." });
         return;
       }
-      await saveJob(job);
-      if (inlineRepositoryJobs === "true") void runRepositoryScan(job);
+      await queueRepositoryJob(job);
       jobs.push(job);
     }
-    response.status(202).json(parsed.data.repositories ? { jobs } : jobs[0]);
+    if (!jobs.length && !approvals.length) {
+      response.status(400).json({ error: "No repository scans were submitted." });
+      return;
+    }
+    response.status(202).json(parsed.data.repositories || approvals.length ? { jobs, approvals } : jobs[0]);
   } catch (reason) {
     response.status(400).json({ error: reason instanceof Error ? reason.message : "Repository job rejected" });
   }

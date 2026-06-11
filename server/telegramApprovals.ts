@@ -4,9 +4,9 @@ import { runAiWorkflow } from "./ai.js";
 import { databaseClient, writeOperationAudit } from "./infrastructure.js";
 import { recentRepositoryJobCount } from "./infrastructure.js";
 import { createRemediationPullRequest } from "./github.js";
-import { getJob, saveJob, type ScanJob, type ToolResult } from "./jobStore.js";
+import { getJob, type ScanJob, type ToolResult } from "./jobStore.js";
 import { answerTelegramCallback, sendTelegramApproval, sendTelegramChatMessage, sendTelegramMessage, updateTelegramApprovalMessage } from "./notifications.js";
-import { createRepositoryJob } from "./repositoryScanner.js";
+import { createRepositoryJob, queueRepositoryJob } from "./repositoryScanner.js";
 import { analyzeSource } from "./sourceScanner.js";
 import { scanWallet } from "./walletScanner.js";
 
@@ -188,7 +188,7 @@ export async function handleTelegramCallback(update: any) {
   if (!query?.id || !match) return { handled: false };
   const decision = match[1] === "a" ? "approved" : "rejected";
   const result = await decideTelegramApproval(match[2], decision, String(query.from?.id ?? ""), String(query.message?.chat?.id ?? ""));
-  await answerTelegramCallback(String(query.id), `Approval ${result.status}`);
+  await answerTelegramCallback(String(query.id), `Approval ${result.status}`).catch(() => undefined);
   if (result.status === "approved" && result.requestedBy.startsWith("telegram:") && result.action === "github.remediation-pr") {
     const payload = await getTelegramApprovalPayload(result.id) as Parameters<typeof createRemediationPullRequest>[0] | undefined;
     if (!payload) throw new Error("Telegram PR payload is unavailable.");
@@ -198,7 +198,7 @@ export async function handleTelegramCallback(update: any) {
     await sendTelegramMessage(`Draft PR created: ${String(pr.html_url ?? "")}`);
     return { handled: true, approval: result, pullRequest: pr };
   }
-  if (result.status === "approved" && result.requestedBy.startsWith("telegram:") && result.action === "repository.scan") {
+  if (result.status === "approved" && result.action === "repository.scan") {
     const payload = await getTelegramApprovalPayload(result.id) as { repository?: string } | undefined;
     if (!payload?.repository) throw new Error("Telegram repository scan payload is unavailable.");
     await consumeTelegramApproval(result.id, result.action, payload);
@@ -206,7 +206,7 @@ export async function handleTelegramCallback(update: any) {
     if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
       throw new Error("Repository hourly scan quota reached.");
     }
-    await saveJob(job);
+    await queueRepositoryJob(job);
     await writeOperationAudit(result.requestedBy, "repository.scan.request", job.repository, "queued", { jobId: job.id, approvalId: result.id });
     await sendTelegramMessage(`Repository scan approved and queued.\n${job.id}\n${job.repository}\nUse Check Scan Status and paste ${job.id}`);
     return { handled: true, approval: result, job };
@@ -374,7 +374,7 @@ async function handleTelegramCommand(text: string, chatId: string, userId: strin
     if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
       throw new Error("Repository hourly scan quota reached.");
     }
-    await saveJob(job);
+    await queueRepositoryJob(job);
     await reply(`Repository scan queued.\n${job.id}\nUse /status ${job.id}`);
     return { handled: true, command: "scan", job };
   }
