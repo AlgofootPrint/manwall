@@ -452,6 +452,14 @@ export default function App() {
     };
   }
 
+  function repositoryScanSummary(result: RepositoryJob["result"]) {
+    if (!result) return "";
+    if (result.filesScanned === 0) return "No Solidity files found";
+    const filesLabel = result.filesScanned === 1 ? "1 Solidity file" : `${result.filesScanned} Solidity files`;
+    const findingsLabel = result.findings === 1 ? "1 security finding" : `${result.findings} security findings`;
+    return `${filesLabel} · ${findingsLabel}`;
+  }
+
   function attestationInput(): AttestationInput | null {
     if (!report) return null;
     return {
@@ -607,7 +615,7 @@ export default function App() {
         <section className="repository-section" id="repository">
           <div className="section-heading">
             <div><p className="eyebrow">Repository ingestion</p><h2>Scan the codebase,<br />not a pasted fragment.</h2></div>
-            <p className="section-copy">Submit a public GitHub repository. manwall clones a shallow snapshot, records its commit, discovers Solidity files, and persists every result as a durable job.</p>
+            <p className="section-copy">Submit a public GitHub repository. manwall clones a shallow snapshot, records its commit, reports whether Solidity files were found, and persists every result as a durable job.</p>
           </div>
           <div className="repository-grid">
             <div className="repository-submit">
@@ -620,7 +628,7 @@ export default function App() {
                 <b>{repositoryJob.repository.replace(/\.git$/, "")}</b>
                 {["queued", "running"].includes(repositoryJob.status) && <strong>{repositoryJob.status === "queued" ? "Waiting for an isolated scan worker." : "Cloning and analyzing the repository in isolation."}</strong>}
                 {repositoryJob.result && <>
-                  <strong>{repositoryJob.result.filesScanned} files · {repositoryJob.result.findings} security findings</strong>
+                  <strong>{repositoryScanSummary(repositoryJob.result)}</strong>
                   <a className="job-commit-link" href={repositoryCommitUrl(repositoryJob.repository, repositoryJob.result.commit)} target="_blank" rel="noreferrer">
                     Pinned commit {short(repositoryJob.result.commit)} <ExternalLink size={11} />
                   </a>
@@ -948,3 +956,4 @@ function AiReview({ result }: { result: AiResult }) {
     <code>{result.usage.inputTokens} input tokens · {result.usage.outputTokens} output tokens · ${result.usage.estimatedCostUsd.toFixed(6)}</code>
   </div>;
 }
+
