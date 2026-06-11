@@ -117,6 +117,13 @@ CREATE TABLE IF NOT EXISTS repository_monitor_state (
   checked_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS repository_scan_quotas (
+  repository text PRIMARY KEY,
+  window_started_at timestamptz NOT NULL DEFAULT now(),
+  scan_count integer NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS attestations (
   scan_id text PRIMARY KEY,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -136,3 +143,4 @@ CREATE INDEX IF NOT EXISTS operation_audit_logs_created_at_idx ON operation_audi
 CREATE INDEX IF NOT EXISTS auth_sessions_expires_at_idx ON auth_sessions (expires_at);
 CREATE INDEX IF NOT EXISTS telegram_approvals_status_expires_at_idx ON telegram_approvals (status, expires_at);
 CREATE INDEX IF NOT EXISTS repository_monitor_state_checked_at_idx ON repository_monitor_state (checked_at DESC);
+CREATE INDEX IF NOT EXISTS repository_scan_quotas_updated_at_idx ON repository_scan_quotas (updated_at DESC);

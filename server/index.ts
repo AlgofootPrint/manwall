@@ -10,7 +10,7 @@ import type { ScanReport } from "./types.js";
 import { getCapabilities } from "./capabilities.js";
 import { createRepositoryJob, queueRepositoryJob } from "./repositoryScanner.js";
 import { getJob, listJobs } from "./jobStore.js";
-import { configureTeamAuthorization, infrastructureStatus, listOperationAudits, recentRepositoryJobCount, writeOperationAudit } from "./infrastructure.js";
+import { configureTeamAuthorization, infrastructureStatus, listOperationAudits, repositoryScanQuotaStatus, writeOperationAudit } from "./infrastructure.js";
 import { acceptGitHubWebhook, createRemediationPullRequest, getGitHubRepositoryAccess, verifyGitHubWebhookSignature } from "./github.js";
 import { getAiStatus, listAiAuditLogs, runAiWorkflow } from "./ai.js";
 import { actorFromRequest, completeGithubLogin, githubLogin, monitoredRepositories, normalizeRepositoryName, repositoryAuthorized, safeOAuthReturnTarget, verifyGithubOAuthState } from "./auth.js";
@@ -257,9 +257,9 @@ app.post("/api/github/webhook", async (request, response) => {
     response.status(202).json({ accepted: false, event, delivery, repository: job.repository, detail: "Repository is not in the monitored allowlist." });
     return;
   }
-  const recent = await recentRepositoryJobCount(job.repository);
-  if (recent >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
-    response.status(429).json({ error: "Repository hourly scan quota reached." });
+  const quota = await repositoryScanQuotaStatus(job.repository);
+  if (!quota.allowed) {
+    response.status(429).json({ error: "Repository hourly scan quota reached.", resetAt: quota.resetAt });
     return;
   }
   await queueRepositoryJob(job);
@@ -521,9 +521,9 @@ app.post("/api/jobs/repository", async (request, response) => {
         approvals.push(approval);
         continue;
       }
-      const recent = await recentRepositoryJobCount(job.repository);
-      if (recent >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
-        response.status(429).json({ error: "Repository hourly scan quota reached." });
+      const quota = await repositoryScanQuotaStatus(job.repository);
+      if (!quota.allowed) {
+        response.status(429).json({ error: "Repository hourly scan quota reached.", resetAt: quota.resetAt });
         return;
       }
       await queueRepositoryJob(job);

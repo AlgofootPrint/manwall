@@ -101,14 +101,19 @@ export async function listJobRecords(): Promise<ScanJob[] | null> {
 export async function repositoryWorkerStatus() {
   const client = database();
   if (!client) return { active: false, detail: "No shared job database is configured.", tools: { slither: false, foundry: false } };
-  const result = await client.query(`
-    SELECT status, updated_at, result
-    FROM scan_jobs
-    WHERE status IN ('running', 'completed')
-      AND updated_at > now() - interval '30 minutes'
-    ORDER BY updated_at DESC
-    LIMIT 1
-  `);
+  let result;
+  try {
+    result = await client.query(`
+      SELECT status, updated_at, result
+      FROM scan_jobs
+      WHERE status IN ('running', 'completed')
+        AND updated_at > now() - interval '30 minutes'
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `);
+  } catch {
+    return { active: false, detail: "Repository worker database is unavailable.", tools: { slither: false, foundry: false } };
+  }
   const row = result.rows[0];
   if (!row) return { active: false, detail: "No repository worker activity was recorded in the last 30 minutes.", tools: { slither: false, foundry: false } };
   const tools = row.result?.tools ?? {};
@@ -303,11 +308,80 @@ export async function monthlyAiUsage(monthKey: string) {
 export async function recentRepositoryJobCount(repository: string, sinceMinutes = 60) {
   const client = database();
   if (!client) return 0;
-  const result = await client.query(
-    "SELECT count(*) AS count FROM scan_jobs WHERE repository = $1 AND created_at > now() - ($2 * interval '1 minute')",
-    [repository, sinceMinutes]
-  );
-  return Number(result.rows[0]?.count ?? 0);
+  try {
+    const result = await client.query(
+      "SELECT count(*) AS count FROM scan_jobs WHERE repository = $1 AND created_at > now() - ($2 * interval '1 minute')",
+      [repository, sinceMinutes]
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+export interface RepositoryScanQuotaStatus {
+  allowed: boolean;
+  count: number;
+  limit: number;
+  remaining: number;
+  resetAt: string | null;
+}
+
+export async function repositoryScanQuotaStatus(repository: string, limit = Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5), sinceMinutes = 60): Promise<RepositoryScanQuotaStatus> {
+  const client = database();
+  if (!client) {
+    return { allowed: true, count: 0, limit, remaining: limit, resetAt: null };
+  }
+  const poolClient = await client.connect();
+  const windowMs = sinceMinutes * 60 * 1000;
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  try {
+    await poolClient.query("BEGIN");
+    await poolClient.query("SELECT pg_advisory_xact_lock(hashtext($1))", [repository]);
+    const result = await poolClient.query(
+      "SELECT window_started_at, scan_count FROM repository_scan_quotas WHERE repository = $1 FOR UPDATE",
+      [repository]
+    );
+    const row = result.rows[0] as { window_started_at?: Date; scan_count?: number } | undefined;
+    if (!row) {
+      await poolClient.query(
+        "INSERT INTO repository_scan_quotas (repository, window_started_at, scan_count, updated_at) VALUES ($1, $2, 1, $2)",
+        [repository, nowIso]
+      );
+      await poolClient.query("COMMIT");
+      return { allowed: true, count: 1, limit, remaining: Math.max(limit - 1, 0), resetAt: null };
+    }
+
+    const startedAt = new Date(row.window_started_at ?? nowIso).getTime();
+    if (startedAt <= now - windowMs) {
+      await poolClient.query(
+        "UPDATE repository_scan_quotas SET window_started_at = $2, scan_count = 1, updated_at = $2 WHERE repository = $1",
+        [repository, nowIso]
+      );
+      await poolClient.query("COMMIT");
+      return { allowed: true, count: 1, limit, remaining: Math.max(limit - 1, 0), resetAt: null };
+    }
+
+    const currentCount = Number(row.scan_count ?? 0);
+    if (currentCount >= limit) {
+      await poolClient.query("COMMIT");
+      return { allowed: false, count: currentCount, limit, remaining: 0, resetAt: new Date(startedAt + windowMs).toISOString() };
+    }
+
+    const nextCount = currentCount + 1;
+    await poolClient.query(
+      "UPDATE repository_scan_quotas SET scan_count = $2, updated_at = $3 WHERE repository = $1",
+      [repository, nextCount, nowIso]
+    );
+    await poolClient.query("COMMIT");
+    return { allowed: true, count: nextCount, limit, remaining: Math.max(limit - nextCount, 0), resetAt: null };
+  } catch (reason) {
+    await poolClient.query("ROLLBACK").catch(() => undefined);
+    throw reason;
+  } finally {
+    poolClient.release();
+  }
 }
 
 export interface RepositoryMonitorState {
@@ -354,7 +428,7 @@ export async function writeOperationAudit(actor: string, action: string, subject
   await client.query(
     "INSERT INTO operation_audit_logs (actor, action, subject, status, detail) VALUES ($1, $2, $3, $4, $5)",
     [actor, action, subject, status, detail]
-  );
+  ).catch(() => undefined);
 }
 
 export async function listOperationAudits() {

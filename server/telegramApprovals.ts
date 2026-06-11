@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { monitoredRepositories, normalizeRepositoryName } from "./auth.js";
 import { runAiWorkflow } from "./ai.js";
 import { databaseClient, writeOperationAudit } from "./infrastructure.js";
-import { recentRepositoryJobCount } from "./infrastructure.js";
+import { repositoryScanQuotaStatus } from "./infrastructure.js";
 import { createRemediationPullRequest } from "./github.js";
 import { getJob, type ScanJob, type ToolResult } from "./jobStore.js";
 import { answerTelegramCallback, sendTelegramApproval, sendTelegramChatMessage, sendTelegramMessage, updateTelegramApprovalMessage } from "./notifications.js";
@@ -203,8 +203,9 @@ export async function handleTelegramCallback(update: any) {
     if (!payload?.repository) throw new Error("Telegram repository scan payload is unavailable.");
     await consumeTelegramApproval(result.id, result.action, payload);
     const job = createRepositoryJob(payload.repository);
-    if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
-      throw new Error("Repository hourly scan quota reached.");
+    const quota = await repositoryScanQuotaStatus(job.repository);
+    if (!quota.allowed) {
+      throw new Error(`Repository hourly scan quota reached. Try again after ${quota.resetAt ?? "the reset window"}.`);
     }
     await queueRepositoryJob(job);
     await writeOperationAudit(result.requestedBy, "repository.scan.request", job.repository, "queued", { jobId: job.id, approvalId: result.id });
@@ -371,8 +372,9 @@ async function handleTelegramCommand(text: string, chatId: string, userId: strin
           : "An approval alert was posted in this Manwall group. Direct alert links require the group to be upgraded to a Telegram supergroup."
       ].join("\n"));
     }
-    if (await recentRepositoryJobCount(job.repository) >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
-      throw new Error("Repository hourly scan quota reached.");
+    const quota = await repositoryScanQuotaStatus(job.repository);
+    if (!quota.allowed) {
+      throw new Error(`Repository hourly scan quota reached. Try again after ${quota.resetAt ?? "the reset window"}.`);
     }
     await queueRepositoryJob(job);
     await reply(`Repository scan queued.\n${job.id}\nUse /status ${job.id}`);
