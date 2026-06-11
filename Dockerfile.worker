@@ -11,6 +11,7 @@ COPY package.json package-lock.json ./
 RUN npm install --omit=dev
 COPY server ./server
 COPY contracts ./contracts
+COPY Dockerfile.runner runner.package.json ./
 COPY tsconfig.node.json ./
 
-CMD ["node", "--import", "tsx", "server/worker.ts"]
+CMD ["sh", "-c", "docker build -f Dockerfile.runner -t ${SCAN_RUNNER_IMAGE:-manwall-scan-runner:local} . && exec node --import tsx server/worker.ts"]
