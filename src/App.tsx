@@ -70,6 +70,13 @@ type RepositoryJob = {
     tools?: { compilation?: RepositoryToolResult; slither: RepositoryToolResult; foundry: RepositoryToolResult };
   };
 };
+type TelegramApproval = {
+  id: string;
+  action: string;
+  subject: string;
+  status: "pending" | "approved" | "rejected" | "consumed" | "expired";
+  expiresAt: string;
+};
 type AttestationInput = {
   scanId: string;
   subject: string;
@@ -355,11 +362,19 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(repositories.length > 1 ? { repositories } : { repository: repositories[0] })
       });
-      const body = await response.json().catch(() => ({})) as RepositoryJob & { jobs?: RepositoryJob[]; error?: string };
+      const body = await response.json().catch(() => ({})) as RepositoryJob & {
+        jobs?: RepositoryJob[];
+        approvals?: TelegramApproval[];
+        error?: string;
+      };
       if (!response.ok) throw new Error(body.error ?? `Repository scan request failed with HTTP ${response.status}.`);
-      const jobs = body.jobs ?? [body];
-      setRepositoryJobs(jobs);
-      setRepositoryStatus(`${jobs.length} scan job${jobs.length === 1 ? "" : "s"} submitted. Results will update automatically.`);
+      const jobs = body.jobs ?? (body.id ? [body] : []);
+      const approvals = body.approvals ?? [];
+      if (jobs.length) setRepositoryJobs(jobs);
+      const statusParts = [];
+      if (jobs.length) statusParts.push(`${jobs.length} scan job${jobs.length === 1 ? "" : "s"} submitted`);
+      if (approvals.length) statusParts.push("Telegram approval requested for this repository");
+      setRepositoryStatus(`${statusParts.join("; ")}. ${jobs.length ? "Results will update automatically. " : ""}${approvals.length ? "Awaiting Approval" : ""}`.trim());
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Repository scan submission failed.";
       setRepositoryStatus(`Start scan failed: ${message}`);

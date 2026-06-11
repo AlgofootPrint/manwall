@@ -40,6 +40,12 @@ export async function runRepositoryScan(job: ScanJob) {
   }
 }
 
+export async function queueRepositoryJob(job: ScanJob) {
+  await saveJob(job);
+  const inlineRepositoryJobs = process.env.INLINE_REPOSITORY_JOBS ?? (process.env.NODE_ENV === "production" ? "false" : "true");
+  if (inlineRepositoryJobs === "true") void runRepositoryScan(job);
+}
+
 export function createRepositoryJob(repository: string): ScanJob {
   const now = new Date().toISOString();
   return {
