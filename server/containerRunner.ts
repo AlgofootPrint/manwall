@@ -56,7 +56,8 @@ function solidityFiles(root: string) {
 }
 
 async function clone(repository: string) {
-  const result = await run("git", ["clone", "--depth", "1", "--filter=blob:none", "--recurse-submodules", "--shallow-submodules", repository, "/workspace/repository"]);
+  fs.rmSync("/workspace/repository", { recursive: true, force: true });
+  const result = await run("git", ["clone", "--depth", "1", "--filter=blob:none", "--no-recurse-submodules", repository, "/workspace/repository"]);
   if (result.code !== 0) throw new Error(result.stderr || `git clone exited with ${result.code}`);
 }
 

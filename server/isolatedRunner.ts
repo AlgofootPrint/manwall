@@ -46,6 +46,7 @@ export async function runIsolatedRepositoryScan(job: ScanJob) {
   const scanContainer = `manwall-${job.id.toLowerCase()}-scan`;
   const volume = `manwall-${job.id.toLowerCase()}-workspace`;
 
+  await docker(["volume", "rm", "-f", volume], scanContainer).catch(() => undefined);
   await docker(["volume", "create", volume], cloneContainer);
   try {
     await docker([
