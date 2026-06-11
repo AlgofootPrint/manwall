@@ -375,7 +375,8 @@ const aiReviewRequest = z.object({
 
 app.post("/api/ai/review", async (request, response) => {
   const actor = await actorFromRequest(request);
-  if (!actor.authenticated) return void response.status(401).json({ error: "Authentication required." });
+  const publicReviewEnabled = process.env.ALLOW_PUBLIC_AI_REVIEW === "true";
+  if (!actor.authenticated && !publicReviewEnabled) return void response.status(401).json({ error: "Authentication required." });
   const parsed = aiReviewRequest.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ error: "Invalid AI review request", details: parsed.error.flatten() });
