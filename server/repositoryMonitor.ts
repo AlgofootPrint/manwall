@@ -2,7 +2,7 @@ import { monitoredRepositories, normalizeRepositoryName } from "./auth.js";
 import { getGitHubRepositorySnapshot } from "./github.js";
 import {
   getRepositoryMonitorState,
-  recentRepositoryJobCount,
+  repositoryScanQuotaStatus,
   saveRepositoryMonitorState,
   writeOperationAudit
 } from "./infrastructure.js";
@@ -51,8 +51,8 @@ export async function pollRepository(repository: string): Promise<RepositoryPoll
     }
 
     const job = createRepositoryJob(`https://github.com/${snapshot.repository}`);
-    const recent = await recentRepositoryJobCount(job.repository);
-    if (recent >= Number(process.env.REPOSITORY_JOBS_PER_HOUR ?? 5)) {
+    const quota = await repositoryScanQuotaStatus(job.repository);
+    if (!quota.allowed) {
       await writeOperationAudit("monitor", "repository.poll", snapshot.repository, "rate-limited", { changed });
       return { repository: snapshot.repository, status: "rate-limited", changed };
     }
