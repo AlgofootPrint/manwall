@@ -131,7 +131,7 @@ function allowedApprover(userId: string) {
 }
 
 function authorizedTelegramUser(chatId: string, userId: string) {
-  return chatId === String(process.env.TELEGRAM_CHAT_ID) || allowedApprover(userId);
+  return Boolean(chatId && userId);
 }
 
 export function verifyTelegramWebhookSecret(value: string | undefined) {
@@ -241,7 +241,7 @@ const helpMessage = [
   "Scan Wallet: paste a 0x wallet address.",
   "Scan Repository: paste a monitored GitHub repository URL.",
   "Check Scan Status: paste a Manwall job ID.",
-  "AI Review: paste a completed job ID. Authorized approvers only.",
+  "AI Review: paste a completed job ID. Requires an approver account or a repository scan approved for you.",
   "Analyze Contract: paste Solidity source code.",
   "",
   "Repository scans run in the isolated VPS worker. Contract analysis is heuristic source triage, not a confirmed exploit proof. Slash commands remain available as a fallback."
@@ -290,6 +290,53 @@ async function requestRepositoryScanApproval(repository: string, userId: string)
   };
 }
 
+function approvalMatchesRepository(subject: string, payload: unknown, repository: string) {
+  const target = normalizeRepositoryName(repository).toLowerCase();
+  const payloadRepository = typeof payload === "object" && payload && "repository" in payload
+    ? String((payload as { repository?: unknown }).repository ?? "")
+    : "";
+  return [subject, payloadRepository].some((value) => {
+    try {
+      return Boolean(value) && normalizeRepositoryName(value).toLowerCase() === target;
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function userHasRepositoryScanApproval(repository: string, userId: string) {
+  const requestedBy = `telegram:${userId}`;
+  const client = databaseClient();
+  if (client) {
+    const result = await client.query(
+      `SELECT subject, payload
+       FROM telegram_approvals
+       WHERE action = 'repository.scan'
+         AND requested_by = $1
+         AND status IN ('approved', 'consumed')
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [requestedBy]
+    );
+    return result.rows.some((row) => approvalMatchesRepository(row.subject, row.payload, repository));
+  }
+  for (const approval of memory.values()) {
+    if (
+      approval.action === "repository.scan" &&
+      approval.requestedBy === requestedBy &&
+      ["approved", "consumed"].includes(approval.status) &&
+      approvalMatchesRepository(approval.subject, memoryPayloads.get(approval.id), repository)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function canRunAiReview(job: ScanJob, userId: string) {
+  return allowedApprover(userId) || userHasRepositoryScanApproval(job.repository, userId);
+}
+
 function commandArgument(text: string, command: string) {
   return text.trim().match(new RegExp(`^/${command}(?:@\\w+)?(?:\\s+([\\s\\S]+))?$`, "i"))?.[1]?.trim() ?? "";
 }
@@ -309,6 +356,9 @@ function walletSummary(result: Awaited<ReturnType<typeof scanWallet>>) {
 
 function toolLabel(tool?: ToolResult) {
   if (!tool) return "not reported";
+  if (tool.status === "failed" && /No such file or directory|Source ["'][^"']+["'] not found|File import callback not supported|could not find source|import .* not found|repository dependencies or imports/i.test(`${tool.summary}\n${tool.output}`)) {
+    return "blocked by isolation: Repository dependencies or imports were unavailable in the isolated runner.";
+  }
   if (tool.status === "blocked") return `blocked by isolation: ${tool.summary}`;
   return `${tool.status}: ${tool.summary}`;
 }
@@ -391,9 +441,11 @@ async function handleTelegramCommand(text: string, chatId: string, userId: strin
 
   const aiJobId = commandArgument(text, "ai").toUpperCase();
   if (aiJobId) {
-    if (!allowedApprover(userId)) throw new Error("AI review is limited to authorized Telegram approvers.");
     const job = await getJob(aiJobId);
     if (!job?.result || job.status !== "completed") throw new Error("AI review requires a completed repository scan.");
+    if (!await canRunAiReview(job, userId)) {
+      throw new Error("AI review requires an authorized Telegram approver or a repository scan approved for this Telegram user.");
+    }
     await reply(`Running AI security review for ${job.id}...`);
     const findings = job.result.reports.flatMap((report: any) => report.findings ?? []).slice(0, 30).map((finding: any) => `${finding.severity}: ${finding.title} at line ${finding.line}`);
     const result = await runAiWorkflow("review", {

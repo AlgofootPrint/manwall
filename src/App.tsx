@@ -133,10 +133,17 @@ const fallbackAgents = [
 const short = (value: string) => value.length > 22 ? `${value.slice(0, 11)}...${value.slice(-8)}` : value;
 const repositoryCommitUrl = (repository: string, commit: string) =>
   `${repository.replace(/\.git$/, "")}/commit/${encodeURIComponent(commit)}`;
+const dependencyResolutionPattern = /No such file or directory|Source ["'][^"']+["'] not found|File import callback not supported|could not find source|import .* not found|repository dependencies or imports/i;
+const toolBlockedByDependencies = (tool?: RepositoryToolResult) =>
+  Boolean(tool && tool.status === "failed" && dependencyResolutionPattern.test(`${tool.summary}\n${tool.output}`));
 const displayedToolStatus = (tool?: RepositoryToolResult): RepositoryToolResult["status"] | undefined =>
-  tool?.status === "failed" && /fork-dependent|isolated scans block RPC network access/i.test(tool.summary)
+  toolBlockedByDependencies(tool) || (tool?.status === "failed" && /fork-dependent|isolated scans block RPC network access/i.test(tool.summary))
     ? "blocked"
     : tool?.status;
+const displayedToolSummary = (tool?: RepositoryToolResult) =>
+  toolBlockedByDependencies(tool)
+    ? "Repository dependencies or imports were unavailable in the isolated runner."
+    : tool?.summary ?? "Not reported.";
 const toolStatusLabels: Record<RepositoryToolResult["status"], string> = {
   passed: "Passed",
   blocked: "Blocked by isolation",
@@ -639,16 +646,16 @@ export default function App() {
                     <div><span>Foundry</span><b>{toolStatusLabel(displayedToolStatus(repositoryJob.result.tools?.foundry))}</b></div>
                   </div>
                   {repositoryJob.result.tools && <div className="tool-status-explanations">
-                    <p><b>Slither: {toolStatusLabel(displayedToolStatus(repositoryJob.result.tools.slither))}.</b> {repositoryJob.result.tools.slither.summary}</p>
-                    <p><b>Foundry: {toolStatusLabel(displayedToolStatus(repositoryJob.result.tools.foundry))}.</b> {repositoryJob.result.tools.foundry.summary}</p>
+                    <p><b>Slither: {toolStatusLabel(displayedToolStatus(repositoryJob.result.tools.slither))}.</b> {displayedToolSummary(repositoryJob.result.tools.slither)}</p>
+                    <p><b>Foundry: {toolStatusLabel(displayedToolStatus(repositoryJob.result.tools.foundry))}.</b> {displayedToolSummary(repositoryJob.result.tools.foundry)}</p>
                   </div>}
                   <details>
                     <summary>Inspect scan evidence</summary>
                     <div className="job-evidence">
                       {repositoryJob.result.tools && <>
-                        {repositoryJob.result.tools.compilation && <p><b>Project compilation:</b> {repositoryJob.result.tools.compilation.summary}</p>}
-                        <p><b>Slither:</b> {repositoryJob.result.tools.slither.summary}</p>
-                        <p><b>Foundry:</b> {repositoryJob.result.tools.foundry.summary}</p>
+                        {repositoryJob.result.tools.compilation && <p><b>Project compilation:</b> {displayedToolSummary(repositoryJob.result.tools.compilation)}</p>}
+                        <p><b>Slither:</b> {displayedToolSummary(repositoryJob.result.tools.slither)}</p>
+                        <p><b>Foundry:</b> {displayedToolSummary(repositoryJob.result.tools.foundry)}</p>
                         <details>
                           <summary>Inspect tool command output</summary>
                           {repositoryJob.result.tools.compilation?.output && <pre>Compilation{"\n"}{repositoryJob.result.tools.compilation.output}</pre>}

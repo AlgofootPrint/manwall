@@ -81,7 +81,7 @@ The repository status endpoint at `GET /api/github/status` reports whether the c
 
 The AI workflow uses OpenAI and enforces a local monthly budget gate before making any request. AI patch generation is approval-gated and never auto-applies code changes.
 
-The configured Telegram group can request a constrained draft documentation PR
+Telegram users can request a constrained draft documentation PR
 with `/pr Title | Description`. Manwall generates a unique `manwall/telegram-*`
 branch and a file under `docs/telegram/`, then requires an authorized Telegram
 approver to approve the exact payload before creating the draft PR. Telegram
@@ -91,14 +91,16 @@ job ID, or Solidity source. Slash commands remain available as a fallback:
 
 - Paste an EVM address or use `/wallet <address>` to scan Mantle wallet posture.
 - Use `/scan <GitHub URL>` for monitored repositories and `/status <job-id>` for results.
-- Use `/ai <completed job-id>` for an approver-only AI security review.
+- Use `/ai <completed job-id>` for AI security review after repository approval.
 - Use `/analyze <Solidity source>` for static source triage.
 - Use `/help` to display the command reference.
 
 Repository scans retain the production hourly quota and execute in the isolated
-VPS worker. Group users can scan monitored repositories; users listed in
-`TELEGRAM_APPROVER_USER_IDS` can scan any valid public GitHub repository. AI
-review remains restricted to `TELEGRAM_APPROVER_USER_IDS`.
+VPS worker. Telegram users can scan monitored repositories from the configured
+group or private chats; users listed in
+`TELEGRAM_APPROVER_USER_IDS` can scan any valid public GitHub repository.
+Approvers can run AI review broadly; regular users can run AI review for
+repositories that were approved for their Telegram account.
 When a regular user requests an unmonitored repository, Manwall posts an
 approval-needed group alert and returns a direct link when the configured chat
 is a Telegram supergroup or `TELEGRAM_GROUP_ALERT_URL` is configured. Legacy

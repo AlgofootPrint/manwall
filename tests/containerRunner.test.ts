@@ -27,6 +27,18 @@ describe("isolated tool result normalization", () => {
     expect(result.findings).toBe(2);
   });
 
+  it("reports missing Foundry dependencies as blocked", () => {
+    const result = normalizeFoundryResult({
+      code: 1,
+      stdout: "",
+      stderr: "/tmp/repository/lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol: No such file or directory (os error 2)"
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.findings).toBe(0);
+    expect(result.summary).toContain("dependencies or imports");
+  });
+
   it("reports blocked RPC fork tests without treating them as findings or compiler failures", () => {
     const result = normalizeFoundryResult({
       code: 1,
@@ -75,6 +87,33 @@ describe("isolated tool result normalization", () => {
     expect(result.findings).toBe(0);
   });
 
+  it("reports missing Slither dependencies as blocked", () => {
+    const result = normalizeSlitherResult({
+      code: 0,
+      stdout: JSON.stringify({
+        success: false,
+        error: 'Source "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol" not found'
+      }),
+      stderr: ""
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.findings).toBe(0);
+    expect(result.summary).toContain("dependencies or imports");
+  });
+
+  it("reports missing Slither dependencies as blocked when Slither does not emit JSON", () => {
+    const result = normalizeSlitherResult({
+      code: 1,
+      stdout: "",
+      stderr: 'Error: Source "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol" not found'
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.findings).toBe(0);
+    expect(result.summary).toContain("dependencies or imports");
+  });
+
   it("accepts Slither JSON written to stderr", () => {
     const result = normalizeSlitherResult({
       code: 0,
@@ -92,5 +131,17 @@ describe("isolated tool result normalization", () => {
     expect(result.status).toBe("failed");
     expect(result.findings).toBe(0);
     expect(result.summary).toContain("forge");
+  });
+
+  it("reports missing project dependencies as blocked", () => {
+    const result = normalizeCompilationResult({
+      code: 1,
+      stdout: "",
+      stderr: 'ParserError: Source "lib/forge-std/src/Test.sol" not found: File import callback not supported'
+    }, "forge");
+
+    expect(result.status).toBe("blocked");
+    expect(result.findings).toBe(0);
+    expect(result.summary).toContain("dependencies or imports");
   });
 });

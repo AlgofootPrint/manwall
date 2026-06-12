@@ -93,7 +93,7 @@ export async function configureTelegramWebhook(url: string) {
       { command: "wallet", description: "Scan a Mantle wallet address" },
       { command: "scan", description: "Queue a monitored repository scan" },
       { command: "status", description: "Check a repository scan job" },
-      { command: "ai", description: "Run approver-only AI review" },
+      { command: "ai", description: "Review an approved repository scan with AI" },
       { command: "analyze", description: "Analyze pasted Solidity source" },
       { command: "pr", description: "Request a draft documentation PR" }
     ]
