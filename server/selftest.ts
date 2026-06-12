@@ -59,7 +59,6 @@ const originalEnv = {
   OPENAI_MODEL: process.env.OPENAI_MODEL,
   AI_MONTHLY_BUDGET_USD: process.env.AI_MONTHLY_BUDGET_USD,
   AI_REQUEST_TOKEN_LIMIT: process.env.AI_REQUEST_TOKEN_LIMIT,
-  AI_MONTHLY_REQUEST_LIMIT: process.env.AI_MONTHLY_REQUEST_LIMIT,
   AI_MAX_OUTPUT_TOKENS: process.env.AI_MAX_OUTPUT_TOKENS,
   DATABASE_URL: process.env.DATABASE_URL
 };
@@ -70,7 +69,6 @@ try {
   process.env.OPENAI_MODEL = "gpt-5.4-mini";
   process.env.AI_MONTHLY_BUDGET_USD = "5";
   process.env.AI_REQUEST_TOKEN_LIMIT = "12000";
-  process.env.AI_MONTHLY_REQUEST_LIMIT = "20";
   process.env.AI_MAX_OUTPUT_TOKENS = "128";
   delete process.env.DATABASE_URL;
   globalThis.fetch = async () => ({
@@ -121,7 +119,6 @@ try {
   process.env.OPENAI_MODEL = originalEnv.OPENAI_MODEL;
   process.env.AI_MONTHLY_BUDGET_USD = originalEnv.AI_MONTHLY_BUDGET_USD;
   process.env.AI_REQUEST_TOKEN_LIMIT = originalEnv.AI_REQUEST_TOKEN_LIMIT;
-  process.env.AI_MONTHLY_REQUEST_LIMIT = originalEnv.AI_MONTHLY_REQUEST_LIMIT;
   process.env.AI_MAX_OUTPUT_TOKENS = originalEnv.AI_MAX_OUTPUT_TOKENS;
   process.env.DATABASE_URL = originalEnv.DATABASE_URL;
 }

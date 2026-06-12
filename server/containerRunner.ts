@@ -61,6 +61,10 @@ async function clone(repository: string) {
   if (result.code !== 0) throw new Error(result.stderr || `git clone exited with ${result.code}`);
 }
 
+function dependencyResolutionBlocked(output: string) {
+  return /(?:No such file or directory|Source ["'][^"']+["'] not found|File import callback not supported|could not find source|import .* not found)/i.test(output);
+}
+
 export function normalizeSlitherResult(result: CommandResult): ToolResult {
   const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
   const candidates = [result.stdout, result.stderr].filter(Boolean);
@@ -80,17 +84,28 @@ export function normalizeSlitherResult(result: CommandResult): ToolResult {
       results?: { detectors?: unknown[] };
     };
     const findings = parsed.results?.detectors?.length ?? 0;
+    const blocked = parsed.success === false && dependencyResolutionBlocked(`${parsed.error ?? ""}\n${output}`);
     return {
-      status: parsed.success === false ? "failed" : "passed",
+      status: blocked ? "blocked" : parsed.success === false ? "failed" : "passed",
       findings,
       summary: findings
         ? `Slither reported ${findings} finding${findings === 1 ? "" : "s"}.`
+        : blocked
+          ? "Slither could not run because repository dependencies or imports were unavailable in the isolated runner."
         : parsed.success === false
           ? `Slither failed: ${parsed.error ?? "unknown error"}`
           : "Slither completed without findings.",
       output: truncate(output)
     };
   } catch {
+    if (dependencyResolutionBlocked(output)) {
+      return {
+        status: "blocked",
+        findings: 0,
+        summary: "Slither could not run because repository dependencies or imports were unavailable in the isolated runner.",
+        output: truncate(output)
+      };
+    }
     return {
       status: "failed",
       findings: 0,
@@ -105,6 +120,14 @@ export function normalizeFoundryResult(result: CommandResult): ToolResult {
   const match = output.match(/(\d+)\s+tests?\s+passed[;,]\s+(\d+)\s+failed/i);
   const passed = Number(match?.[1] ?? 0);
   const failed = Number(match?.[2] ?? (result.code === 0 ? 0 : 1));
+  if (result.code !== 0 && dependencyResolutionBlocked(output)) {
+    return {
+      status: "blocked",
+      findings: 0,
+      summary: "Foundry could not run because repository dependencies or imports were unavailable in the isolated runner.",
+      output: truncate(output)
+    };
+  }
   if (/SIGKILL|signal:\s*9|out of memory/i.test(output)) {
     return {
       status: "failed",
@@ -142,6 +165,14 @@ export function normalizeFoundryResult(result: CommandResult): ToolResult {
 
 export function normalizeCompilationResult(result: CommandResult, engine: "forge" | "solc"): ToolResult {
   const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+  if (result.code !== 0 && dependencyResolutionBlocked(output)) {
+    return {
+      status: "blocked",
+      findings: 0,
+      summary: `Project compilation with ${engine} could not run because repository dependencies or imports were unavailable in the isolated runner.`,
+      output: truncate(output)
+    };
+  }
   if (/SIGKILL|signal:\s*9|out of memory/i.test(output)) {
     return {
       status: "failed",

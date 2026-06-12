@@ -33,7 +33,6 @@ export interface AiWorkflowResult {
     spentUsd: number;
     remainingUsd: number;
     requestCount: number;
-    requestLimit: number;
   };
 }
 
@@ -41,7 +40,6 @@ interface BudgetConfig {
   model: string;
   budgetUsd: number;
   requestTokenLimit: number;
-  monthlyRequestLimit: number;
   maxOutputTokens: number;
 }
 
@@ -93,7 +91,6 @@ function budgetConfig(): BudgetConfig {
     model: process.env.OPENAI_MODEL ?? "gpt-5.4-mini",
     budgetUsd: Number(process.env.AI_MONTHLY_BUDGET_USD ?? 5),
     requestTokenLimit: Number(process.env.AI_REQUEST_TOKEN_LIMIT ?? 12_000),
-    monthlyRequestLimit: Number(process.env.AI_MONTHLY_REQUEST_LIMIT ?? 20),
     maxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 1_200)
   };
 }
@@ -265,10 +262,10 @@ export async function getAiStatus() {
       : "Set AI_PROVIDER=openai and OPENAI_API_KEY.",
     budgetUsd: config.budgetUsd,
     requestTokenLimit: config.requestTokenLimit,
-    monthlyRequestLimit: config.monthlyRequestLimit,
     spentUsd: budget.spentUsd,
     requestCount: budget.requestCount,
-    remainingUsd: Math.max(0, config.budgetUsd - budget.spentUsd)
+    remainingUsd: Math.max(0, config.budgetUsd - budget.spentUsd),
+    publicReviewEnabled: process.env.ALLOW_PUBLIC_AI_REVIEW === "true"
   };
 }
 
@@ -306,22 +303,6 @@ export async function runAiWorkflow(workflow: AiWorkflow, input: AiWorkflowInput
       error: `Estimated input size exceeds the per-request token limit of ${config.requestTokenLimit}.`
     });
     throw new Error(`Estimated input size exceeds the per-request token limit of ${config.requestTokenLimit}.`);
-  }
-
-  if (budget.requestCount >= config.monthlyRequestLimit) {
-    await writeAuditLog({
-      workflow,
-      model: config.model,
-      approved,
-      status: "blocked",
-      requestHash,
-      requestSummary: requestSummaryValue,
-      inputTokens: requestTokens,
-      outputTokens: 0,
-      estimatedCostUsd: 0,
-      error: `Monthly AI request limit of ${config.monthlyRequestLimit} reached.`
-    });
-    throw new Error(`Monthly AI request limit of ${config.monthlyRequestLimit} reached.`);
   }
 
   if (budget.spentUsd + projectedCost > config.budgetUsd) {
@@ -376,8 +357,7 @@ export async function runAiWorkflow(workflow: AiWorkflow, input: AiWorkflowInput
         month: budget.month,
         spentUsd: budget.spentUsd,
         remainingUsd: Math.max(0, config.budgetUsd - budget.spentUsd - actualCost),
-        requestCount: budget.requestCount,
-        requestLimit: config.monthlyRequestLimit
+        requestCount: budget.requestCount
       }
     } satisfies AiWorkflowResult;
   } catch (reason) {
