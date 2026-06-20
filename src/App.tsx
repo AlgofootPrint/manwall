@@ -133,6 +133,13 @@ const fallbackAgents = [
 const short = (value: string) => value.length > 22 ? `${value.slice(0, 11)}...${value.slice(-8)}` : value;
 const repositoryCommitUrl = (repository: string, commit: string) =>
   `${repository.replace(/\.git$/, "")}/commit/${encodeURIComponent(commit)}`;
+const normalizeRepositoryName = (value: string) =>
+  value.trim().replace(/^https:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "").toLowerCase();
+const mergeRepositoryJobs = (current: RepositoryJob[], updates: RepositoryJob[]) => {
+  const byId = new Map(current.map((job) => [job.id, job]));
+  for (const job of updates) byId.set(job.id, job);
+  return Array.from(byId.values()).sort((a, b) => String(b.updatedAt ?? b.id).localeCompare(String(a.updatedAt ?? a.id)));
+};
 const dependencyResolutionPattern = /No such file or directory|Source ["'][^"']+["'] not found|File import callback not supported|could not find source|import .* not found|repository dependencies or imports/i;
 const toolBlockedByDependencies = (tool?: RepositoryToolResult) =>
   Boolean(tool && tool.status === "failed" && dependencyResolutionPattern.test(`${tool.summary}\n${tool.output}`));
@@ -359,8 +366,35 @@ export default function App() {
     if (result) setWalletScan(result);
   }
 
+  function watchApprovedRepositoryJobs(repositories: string[], knownJobIds: Set<string>) {
+    const targets = new Set(repositories.map(normalizeRepositoryName));
+    const startedAt = Date.now();
+    const poll = async () => {
+      try {
+        const response = await fetch("/api/jobs");
+        if (!response.ok) throw new Error(`Job list request failed with HTTP ${response.status}.`);
+        const jobs = await response.json() as RepositoryJob[];
+        const approvedJobs = jobs.filter((job) =>
+          targets.has(normalizeRepositoryName(job.repository)) && !knownJobIds.has(job.id)
+        );
+        if (approvedJobs.length) {
+          setRepositoryJobs((current) => mergeRepositoryJobs(current, approvedJobs));
+          setRepositoryStatus(`${approvedJobs.length} approved repository scan${approvedJobs.length === 1 ? "" : "s"} queued. Results will update automatically.`);
+          return;
+        }
+        if (Date.now() - startedAt < 5 * 60_000) {
+          window.setTimeout(poll, 3000);
+        }
+      } catch {
+        if (Date.now() - startedAt < 5 * 60_000) window.setTimeout(poll, 5000);
+      }
+    };
+    window.setTimeout(poll, 3000);
+  }
+
   async function scanRepository() {
     const repositories = repository.split(/[\n,]/).map((value) => value.trim()).filter(Boolean);
+    const knownJobIds = new Set(repositoryJobs.map((job) => job.id));
     setRepositorySubmitting(true);
     setRepositoryStatus(`Submitting ${repositories.length} repository scan${repositories.length === 1 ? "" : "s"}...`);
     try {
@@ -377,11 +411,12 @@ export default function App() {
       if (!response.ok) throw new Error(body.error ?? `Repository scan request failed with HTTP ${response.status}.`);
       const jobs = body.jobs ?? (body.id ? [body] : []);
       const approvals = body.approvals ?? [];
-      if (jobs.length) setRepositoryJobs(jobs);
+      if (jobs.length) setRepositoryJobs((current) => mergeRepositoryJobs(current, jobs));
       const statusParts = [];
       if (jobs.length) statusParts.push(`${jobs.length} scan job${jobs.length === 1 ? "" : "s"} submitted`);
       if (approvals.length) statusParts.push("Telegram approval requested for this repository");
       setRepositoryStatus(`${statusParts.join("; ")}. ${jobs.length ? "Results will update automatically. " : ""}${approvals.length ? "Awaiting Approval" : ""}`.trim());
+      if (approvals.length) watchApprovedRepositoryJobs(repositories, knownJobIds);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Repository scan submission failed.";
       setRepositoryStatus(`Start scan failed: ${message}`);
